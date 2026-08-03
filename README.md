@@ -97,18 +97,6 @@ the interface tells you what you're getting:
 
 You will never discover a limitation at the moment it breaks.
 
-## What Chaudron deliberately does not do
-
-**It does not connect to retailer drive accounts** (Courses U, Intermarché
-Drive, Chronodrive and the like). None of them expose a public client API. The
-only routes are scraping and reverse-engineered mobile endpoints — which break
-on every redesign, violate the retailers' terms, and would require storing your
-retailer credentials.
-
-Purchases are captured from forwarded order emails and photographed receipts
-instead. The reasoning, and the conditions under which this would be revisited,
-are in [ADR 0002](docs/adr/0002-no-retailer-drive-integration.md).
-
 ## Architecture
 
 ```mermaid
