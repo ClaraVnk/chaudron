@@ -63,7 +63,13 @@ async def shoot(
     out: Path,
     *,
     transparent: bool = True,
-) -> None:
+) -> Path:
+    """Render one page to `out` and return it.
+
+    Deliberately returns the path instead of reporting the file size here:
+    `Path.stat()` is a blocking syscall, and calling it inside a coroutine stalls
+    the event loop (ruff ASYNC240). Reporting happens synchronously afterwards.
+    """
     page = await browser.new_page(
         viewport={"width": width, "height": height}, device_scale_factor=1
     )
@@ -72,7 +78,12 @@ async def shoot(
     await page.wait_for_timeout(150)
     await page.screenshot(path=str(out), omit_background=transparent)
     await page.close()
-    sys.stdout.write(f"  {out.relative_to(ROOT)}  {out.stat().st_size} bytes\n")
+    return out
+
+
+def report(paths: list[Path]) -> None:
+    for path in paths:
+        sys.stdout.write(f"  {path.relative_to(ROOT)}  {path.stat().st_size} bytes\n")
 
 
 def build_ico(pngs: list[tuple[int, Path]], out: Path) -> None:
@@ -88,20 +99,20 @@ def build_ico(pngs: list[tuple[int, Path]], out: Path) -> None:
     body = b""
     for size, path in pngs:
         blob = path.read_bytes()
-        entries += struct.pack(
-            "<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(blob), offset
-        )
+        entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(blob), offset)
         offset += len(blob)
         body += blob
     out.write_bytes(header + entries + body)
-    sys.stdout.write(f"  {out.relative_to(ROOT)}  {out.stat().st_size} bytes"
-                     f"  ({len(pngs)} resolutions)\n")
+    sys.stdout.write(
+        f"  {out.relative_to(ROOT)}  {out.stat().st_size} bytes  ({len(pngs)} resolutions)\n"
+    )
 
 
-async def main() -> None:
+async def render_all() -> list[Path]:
     full = (ASSETS / "icon.svg").read_text()
     small = (ASSETS / "icon-small.svg").read_text()
     logo = (ASSETS / "logo.svg").read_text()
+    written: list[Path] = []
 
     executable = find_chromium()
     async with async_playwright() as p:
@@ -109,21 +120,37 @@ async def main() -> None:
 
         for size in (16, 32, 48):
             mark = small if size <= SMALL_MARK_MAX_PX else full
-            await shoot(
-                browser, page_html(mark, size, size), size, size,
-                ASSETS / f"favicon-{size}.png",
+            written.append(
+                await shoot(
+                    browser,
+                    page_html(mark, size, size),
+                    size,
+                    size,
+                    ASSETS / f"favicon-{size}.png",
+                )
             )
 
         for size in (192, 512):
-            await shoot(
-                browser, page_html(full, size, size), size, size,
-                ASSETS / f"icon-{size}.png",
+            written.append(
+                await shoot(
+                    browser,
+                    page_html(full, size, size),
+                    size,
+                    size,
+                    ASSETS / f"icon-{size}.png",
+                )
             )
 
         # Opaque: iOS composites a transparent touch icon onto black.
-        await shoot(
-            browser, page_html(full, 180, 180), 180, 180,
-            ASSETS / "apple-touch-icon.png", transparent=False,
+        written.append(
+            await shoot(
+                browser,
+                page_html(full, 180, 180),
+                180,
+                180,
+                ASSETS / "apple-touch-icon.png",
+                transparent=False,
+            )
         )
 
         # Maskable: the mark occupies ~66% of the canvas so Android's circular
@@ -135,19 +162,33 @@ async def main() -> None:
             "justify-content:center}svg{width:340px;height:340px;display:block}"
             "</style><div class=w>" + full + "</div>"
         )
-        await shoot(
-            browser, maskable, 512, 512,
-            ASSETS / "icon-maskable-512.png", transparent=False,
+        written.append(
+            await shoot(
+                browser,
+                maskable,
+                512,
+                512,
+                ASSETS / "icon-maskable-512.png",
+                transparent=False,
+            )
         )
 
         # README header: mark + wordmark only. The tagline is real text in the
         # README, so baking it in here would show it twice.
         wordmark = (ASSETS / "wordmark.svg").read_text()
-        await shoot(
-            browser, page_html(wordmark, 660, 213), 660, 213, ASSETS / "wordmark.png"
+        written.append(
+            await shoot(
+                browser,
+                page_html(wordmark, 660, 213),
+                660,
+                213,
+                ASSETS / "wordmark.png",
+            )
         )
 
-        await shoot(browser, page_html(logo, 720, 212), 720, 212, ASSETS / "logo.png")
+        written.append(
+            await shoot(browser, page_html(logo, 720, 212), 720, 212, ASSETS / "logo.png")
+        )
 
         social = (
             "<!doctype html><meta charset=utf-8><style>html,body{margin:0}"
@@ -157,13 +198,24 @@ async def main() -> None:
             "svg{width:880px;height:259px;display:block}"
             "</style><div class=c>" + logo + "</div>"
         )
-        await shoot(
-            browser, social, 1280, 640,
-            ASSETS / "social-preview.png", transparent=False,
+        written.append(
+            await shoot(
+                browser,
+                social,
+                1280,
+                640,
+                ASSETS / "social-preview.png",
+                transparent=False,
+            )
         )
 
         await browser.close()
 
+    return written
+
+
+def main() -> None:
+    report(asyncio.run(render_all()))
     build_ico(
         [(s, ASSETS / f"favicon-{s}.png") for s in (16, 32, 48)],
         ASSETS / "favicon.ico",
@@ -171,4 +223,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
