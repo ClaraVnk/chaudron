@@ -1,0 +1,41 @@
+<!-- viewBox is cropped to the artwork rather than left at 0 0 256 256: the
+     untouched square leaves a third of the height empty above the rim, and at
+     16 px that padding is three of the sixteen rows, which is the difference
+     between a readable mark and a speck. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 22 240 240" role="img" aria-label="Chaudron">
+  <title>Chaudron</title>
+
+  <!--
+    Variant for 16–32 px (favicon, tab strip, browser bookmarks).
+
+    Not a scaled copy of icon.svg. At those sizes the legs collapse into two
+    grey pixels, the steam turns to noise, and the ingredient discs merge with
+    the broth. Everything that cannot survive is removed, and what remains is
+    enlarged to fill the canvas: a dark vessel with something hot in it, which
+    is the whole idea and the only part that still reads at 16 px.
+  -->
+
+  <defs>
+    <linearGradient id="ironS" x1="0.25" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#4A4E57"/>
+      <stop offset="0.6" stop-color="#31343B"/>
+      <stop offset="1" stop-color="#212328"/>
+    </linearGradient>
+    <radialGradient id="brothS" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0" stop-color="#FFD166"/>
+      <stop offset="0.55" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#D9480F"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Thicker, blunter handles: below ~24 px a thin stroke drops out entirely. -->
+  <g fill="none" stroke="#2E3138" stroke-width="22" stroke-linecap="round">
+    <path d="M44 92 C 14 104, 14 132, 32 146"/>
+    <path d="M212 92 C 242 104, 242 132, 224 146"/>
+  </g>
+
+  <path d="M20 92 C 20 184, 66 224, 128 224 C 190 224, 236 184, 236 92 Z" fill="url(#ironS)"/>
+
+  <ellipse cx="128" cy="92" rx="108" ry="32" fill="#42464F"/>
+  <ellipse cx="128" cy="94" rx="92" ry="25" fill="url(#brothS)"/>
+</svg>

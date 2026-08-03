@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🍲 Chaudron
+<img src="assets/wordmark.png" alt="Chaudron" width="420">
 
 **Throw in what you have. See what comes out.**
 
