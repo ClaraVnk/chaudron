@@ -1,0 +1,67 @@
+# syntax pinned by digest-free tags on purpose: bump deliberately, never implicitly.
+#
+# Build with Podman from the repository root:
+#   podman build -t localhost/pantry-api:dev -f backend/Containerfile backend
+#
+# NOTE: HEALTHCHECK is a Docker-format instruction. Podman's default OCI output
+# format drops it with a warning, so build with `--format docker` when the
+# baked-in healthcheck matters. Quadlet deployments declare their own
+# HealthCmd= instead, which works regardless of image format.
+
+# ---------------------------------------------------------------------------
+# Stage 1 — build: resolve and install dependencies into a self-contained venv.
+# ---------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_NO_DEV=1
+
+WORKDIR /build
+
+# Dependency manifests first: this layer is cached until the lockfile changes.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --no-dev
+
+# Application source, then install the project itself into the same venv.
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable --no-dev
+
+# ---------------------------------------------------------------------------
+# Stage 2 — runtime: minimal image, no build toolchain, no uv, non-root.
+# ---------------------------------------------------------------------------
+FROM python:3.14-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    PANTRY_PORT=8000
+
+# Unprivileged account. A fixed UID/GID keeps rootless volume ownership stable
+# across rebuilds and across the host's subuid range.
+RUN groupadd --system --gid 10001 pantry \
+    && useradd --system --uid 10001 --gid pantry --home-dir /app --no-create-home pantry
+
+WORKDIR /app
+
+COPY --from=builder --chown=pantry:pantry /build/.venv /app/.venv
+
+# When Alembic lands, add here:
+#   COPY --chown=pantry:pantry alembic.ini /app/
+#   COPY --chown=pantry:pantry migrations /app/migrations
+# Migrations are run as a separate one-shot unit, never from the app entrypoint.
+
+USER pantry
+
+EXPOSE 8000
+
+# Liveness only: /healthz answers without touching the database, so a degraded
+# dependency does not get the container killed. Readiness (/readyz) is checked
+# by the orchestrator, not here.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f\"http://127.0.0.1:{os.environ.get('PANTRY_PORT','8000')}/healthz\", timeout=4).status == 200 else 1)"]
+
+CMD ["sh", "-c", "exec uvicorn pantry.api.main:app --host 0.0.0.0 --port \"${PANTRY_PORT:-8000}\""]

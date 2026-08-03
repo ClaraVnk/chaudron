@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# Assistant / editor configuration — never versioned
+# ---------------------------------------------------------------------------
+.claude/
+CLAUDE.md
+.claude.json
+settings.local.json
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Secrets and local environment
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+dist/
+build/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+dmypy.json
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# ---------------------------------------------------------------------------
+# Node / frontend
+# ---------------------------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Containers and ops
+# ---------------------------------------------------------------------------
+.container-build/
+*.tar
+
+# ---------------------------------------------------------------------------
+# Logs and runtime artifacts
+# ---------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+.cache/
+
+# ---------------------------------------------------------------------------
+# Secrets, key material and data dumps  (SEC-002, SEC-011)
+# ---------------------------------------------------------------------------
+# Quadlet environment files hold PANTRY_CREDENTIAL_ENCRYPTION_KEY and provider
+# API keys in clear text. They belong in $HOME on the host, never in the repo.
+*.env
+!.env.example
+pantry.env
+pantry-db.env
+
+# Key material, in any of the shapes it usually takes
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+.secrets/
+
+# Database dumps: a Pantry dump is a full inventory of someone's home, plus the
+# encrypted provider credentials. Keep them out of the working tree entirely.
+*.sql
+*.dump
+*.sql.gz
+*.dump.gz
+!backend/migrations/**/*.sql
+dumps/
+backups/
+
+# Open Food Facts local dataset (ADR-0008): gigabytes, and ODbL-licensed
+data/openfoodfacts/
+*.jsonl
+*.jsonl.gz
+
+# Receipt images and user uploads — personal data, never versioned
+uploads/
+media/
+receipts/
