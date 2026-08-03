@@ -1,3 +1,7 @@
+# Third-party actions are pinned to a full commit SHA, with the release they
+# correspond to in a trailing comment. A `vN` tag is a moving pointer that the
+# upstream owner can repoint at will; a SHA is the artefact itself. Bump these
+# by hand, deliberately, and read the diff — nothing renews them automatically.
 name: CI
 
 on:
@@ -6,6 +10,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default, and every job below is content with that. `publish.yml`
+# is the only workflow holding `packages: write`, and it never runs pull-request
+# code — see the guard at the top of its `publish` job.
 permissions:
   contents: read
 
@@ -33,10 +40,12 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -65,10 +74,12 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -114,10 +125,12 @@ jobs:
       CHAUDRON_DATABASE_URL: postgresql+asyncpg://chaudron:chaudron@localhost:5432/chaudron_test
       CHAUDRON_SECRET_KEY: ci-only-not-a-real-secret
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -134,7 +147,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backend-coverage
           path: backend/coverage.xml
@@ -148,7 +161,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: backend-test
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Show podman version
         run: podman version
@@ -176,10 +191,12 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -198,8 +215,9 @@ jobs:
     name: Security / secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          persist-credentials: false
           # Full history so gitleaks can scan every commit, not just the tip.
           fetch-depth: 0
 
@@ -209,13 +227,26 @@ jobs:
       # root commit and `<base>^` does not exist, so the scan aborts with exit
       # code 1 — reported as a leak, while the log says "no leaks found".
       # A red badge that means "the tool broke" is worse than no badge.
+      # The archive is downloaded to disk and checked against a pinned digest
+      # before anything is extracted. Piping straight into `tar` executed
+      # whatever the release URL happened to serve, and a GitHub release asset
+      # can be replaced by its owner without the tag changing. Verifying against
+      # the release's own checksums.txt would not help — that file is replaceable
+      # by the same hand.
+      #
+      # To bump: download the new archive, compare its sha256 against
+      # gitleaks_<version>_checksums.txt, and paste it here in the same commit.
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: "8.24.3"
+          GITLEAKS_SHA256: "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c"
         run: |
-          curl -sSfL \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /usr/local/bin gitleaks
+          set -euo pipefail
+          ARCHIVE="$(mktemp -d)/gitleaks.tar.gz"
+          curl -sSfL -o "$ARCHIVE" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${ARCHIVE}" | sha256sum --check --strict -
+          tar -xzf "$ARCHIVE" -C /usr/local/bin gitleaks
           gitleaks version
 
       # Two passes: the whole history, then the working tree. The second catches
@@ -227,16 +258,17 @@ jobs:
         run: gitleaks dir . --redact --verbose --exit-code 1
 
   # ---------------------------------------------------------------------------
-  # 6. Frontend — READY BUT INACTIVE.
-  # The React/Vite app does not exist yet. Every step is guarded on the presence
-  # of frontend/package.json, so this job reports success and does nothing until
-  # the frontend is scaffolded. Do not delete it: it activates on its own.
+  # 6. Frontend — lint, dependency audit and build.
+  # Every step stays guarded on the presence of frontend/package.json so the job
+  # degrades to a no-op rather than a red badge if the directory ever goes away.
   # ---------------------------------------------------------------------------
   frontend:
-    name: Frontend / lint + build (inactive until scaffolded)
+    name: Frontend / audit + lint + build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Detect frontend
         id: detect
@@ -250,7 +282,7 @@ jobs:
 
       - name: Set up Node
         if: steps.detect.outputs.present == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -260,6 +292,14 @@ jobs:
         if: steps.detect.outputs.present == 'true'
         working-directory: frontend
         run: npm ci
+
+      # The backend has `pip-audit --strict`; the frontend had nothing. Set to
+      # `high` rather than `low` so the build blocks on what is actionable and
+      # is not turned off the first week by a transitive advisory nobody can fix.
+      - name: Audit dependencies
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm audit --audit-level=high
 
       - name: Lint
         if: steps.detect.outputs.present == 'true'

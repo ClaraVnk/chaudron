@@ -17,7 +17,24 @@ ContainerName=chaudron-db
 # Fully-qualified image name: rootless Podman must not rely on short-name
 # resolution, which is ambiguous and prompts interactively.
 Image=docker.io/library/postgres:16
-AutoUpdate=registry
+# `AutoUpdate=registry` is deliberately absent, unlike chaudron.container.
+#
+# The API is stateless and rolls back on its own when a new image fails its
+# health check; the database does neither. Leaving auto-update on here meant the
+# most critical component in the system restarting itself, at a time nobody
+# chose, whenever upstream moved the `16` tag — no maintenance window, no
+# verified backup taken first, and a minor-version bump of PostgreSQL applied
+# unattended.
+#
+# Updating the database is a deliberate act, like a migration:
+#
+#   podman exec chaudron-db pg_dump -U chaudron -d chaudron --format=custom > db.dump
+#   podman pull docker.io/library/postgres:16
+#   systemctl --user restart chaudron-db.service
+#
+# Pinning to a digest instead of `16` would be stricter still, at the cost of a
+# frozen image that stops receiving upstream security fixes until somebody
+# remembers to bump it. The pull above is the point where that trade is made.
 
 # Shared user-defined network so the API resolves the database by container
 # name. Create it once: podman network create chaudron-net

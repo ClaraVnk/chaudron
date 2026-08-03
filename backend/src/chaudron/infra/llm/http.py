@@ -5,7 +5,7 @@ ADR-0007 the base URL is **supplied by the user and dialled by the server**: a
 textbook SSRF primitive. The usual mitigation -- reject private ranges -- is
 inoperative, because the legitimate address of a co-located Ollama *is* private
 (``http://ollama:11434`` on a Podman network). The replacement is an explicit
-allowlist of hosts from the instance environment, plus:
+allowlist of **endpoints** -- host *and* port -- from the instance environment, plus:
 
 * schemes restricted to ``http`` and ``https``;
 * no credentials in the URL;
@@ -15,6 +15,13 @@ allowlist of hosts from the instance environment, plus:
 * redirects disabled, so a permitted host cannot bounce us onto a forbidden one;
 * a bounded timeout and a bounded response size, so a hostile or broken endpoint
   cannot hold a connection or exhaust memory.
+
+The port half of the allowlist is not decoration. While it was missing (security
+audit, AUD-005) a household could point its "Ollama" at any port of an allowed host
+and read the outcomes apart: a listening HTTP server, a listening non-HTTP service
+and a closed port produced three distinguishable answers, which is a port scanner
+with an oracle. Constraining the pair collapses every endpoint the operator did not
+declare into one refusal, taken structurally, before a socket is opened.
 
 Everything here raises domain errors. No ``httpx`` exception crosses the boundary.
 """
@@ -44,6 +51,7 @@ __all__ = [
     "GuardedHttpClient",
     "HttpFailure",
     "Resolver",
+    "endpoint_port",
     "system_resolver",
     "translate_http_status",
     "translate_transport_error",
@@ -51,6 +59,7 @@ __all__ = [
 ]
 
 _ALLOWED_SCHEMES: Final = frozenset({"http", "https"})
+_DEFAULT_SCHEME_PORTS: Final = {"http": 80, "https": 443}
 
 #: Resolve a (host, port) pair to the set of addresses it currently points at.
 Resolver = Callable[[str, int], Awaitable[frozenset[str]]]
@@ -96,13 +105,27 @@ def validate_ollama_base_url(raw_url: str, settings: LlmSettings) -> httpx.URL:
             f"{ALLOWED_HOSTS_ENV_VAR} to the container or service name of your "
             "Ollama and restart the instance"
         )
-    if not settings.allows_host(host):
-        allowed = ", ".join(sorted(settings.ollama_allowed_hosts))
+    port = endpoint_port(url)
+    if not settings.allows_endpoint(host, port):
+        # The refusal names what the caller asked for and nothing else. Listing the
+        # allowlist back would hand a household a map of the instance's private
+        # network (docs/security-model.md, A10) -- and would make the refusal differ
+        # from endpoint to endpoint, which is the oracle this control removes.
         raise ProviderNotConfigured(
-            f"host {host!r} is not in this instance's Ollama allowlist ({allowed}); "
-            f"add it to {ALLOWED_HOSTS_ENV_VAR} and restart the instance"
+            f"{host}:{port} is not an Ollama endpoint this instance permits; "
+            f"add it to {ALLOWED_HOSTS_ENV_VAR} as host:port and restart the instance"
         )
     return url
+
+
+def endpoint_port(url: httpx.URL) -> int:
+    """The port this URL actually dials.
+
+    ``httpx`` normalises a scheme's default port away, so ``http://ollama`` and
+    ``http://ollama:80`` both report ``None`` and both mean 80. Resolving that here
+    means the allowlist compares dialled ports, not written ones.
+    """
+    return url.port or _DEFAULT_SCHEME_PORTS[url.scheme]
 
 
 def translate_transport_error(
@@ -164,13 +187,23 @@ class GuardedHttpClient:
         first-party providers, whose hostnames are ours to trust and are not
         user-supplied. Only the Ollama path, where the URL comes from a household,
         pins its resolution.
+
+        **What this does not do**, stated here because the check reads stronger than
+        it is (security audit, AUD-028): the connection is not then forced onto a
+        pinned address. ``httpx`` resolves the name again when it opens the socket,
+        so a resolver that answers differently a third time is not caught. Requiring
+        the current answer to be a *subset* of the pinned one -- rather than merely
+        to intersect it, which let ``[allowed, hostile]`` through -- is what makes
+        the window narrow rather than closed. Closing it properly means dialling a
+        literal address with the name carried in ``Host``, which is a transport, not
+        a check. The residual is small because the hostname must already be in the
+        instance allowlist, and a household cannot put a name it controls there.
         """
         if self._resolver is None or self._pinned is None:
             return
-        port = self._base_url.port or (443 if self._base_url.scheme == "https" else 80)
         host = self._base_url.host
-        current = await self._resolver(host, port)
-        if not current & self._pinned:
+        current = await self._resolver(host, endpoint_port(self._base_url))
+        if not current or not current <= self._pinned:
             raise ProviderNotConfigured(
                 f"host {host!r} now resolves elsewhere than when it was registered; "
                 "the request was refused (possible DNS rebinding)"

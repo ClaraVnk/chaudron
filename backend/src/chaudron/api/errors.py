@@ -41,6 +41,13 @@ logger = logging.getLogger(__name__)
 PROBLEM_BASE_URI: Final = "https://chaudron.dev/problems/"
 PROBLEM_CONTENT_TYPE: Final = "application/problem+json"
 
+#: One sentence for "no header", "malformed header" and "unknown household"
+#: alike. Three distinguishable answers would let a caller confirm a household
+#: identifier without any observable side effect -- an oracle the comment in
+#: ``deps.py`` claimed to have closed while the code kept it open (audit
+#: AUD-013). The wording says nothing about which of the three happened.
+HOUSEHOLD_NOT_RESOLVED_DETAIL: Final = "The X-Household-Id header is missing or invalid."
+
 
 class ProblemError(Exception):
     """An error that is safe to show a client, in the shape the contract fixes."""
@@ -83,12 +90,55 @@ class ProblemError(Exception):
         )
 
 
-def unauthorized(detail: str) -> ProblemError:
+class RequestBodyTooLarge(StarletteHTTPException):
+    """Raised mid-read when a request body passes the configured bound.
+
+    An :class:`HTTPException` subclass rather than a :class:`ProblemError`
+    because of where it is raised: inside the ASGI ``receive`` callable, whose
+    caller is FastAPI's body reader. That reader re-raises ``HTTPException``
+    unchanged and rewrites every other exception into a generic ``400 There was
+    an error parsing the body`` -- which would report a refused 50 MB upload as a
+    malformed one. The registered handler turns it back into the RFC 9457 shape
+    every other error in this application uses.
+    """
+
+    def __init__(self, limit_bytes: int) -> None:
+        super().__init__(status_code=413, detail="Request body too large")
+        self.limit_bytes = limit_bytes
+
+
+def unauthorized(detail: str = HOUSEHOLD_NOT_RESOLVED_DETAIL) -> ProblemError:
     return ProblemError(
         slug="household-not-resolved",
         title="Household not resolved",
         status=401,
         detail=detail,
+    )
+
+
+def problem_for_body_too_large(limit_bytes: int) -> ProblemError:
+    """``413``, quoting the bound so a client can act rather than guess."""
+    return ProblemError(
+        slug="request-body-too-large",
+        title="Request body too large",
+        status=413,
+        detail=f"The request body exceeds the {limit_bytes} byte limit of this endpoint.",
+        limit_bytes=limit_bytes,
+    )
+
+
+def rate_limited(*, detail: str, retry_after: int) -> ProblemError:
+    """``429`` with the one header a client needs to behave: ``Retry-After``.
+
+    The delay is measured by the limiter that refused, not invented here.
+    """
+    return ProblemError(
+        slug="rate-limited",
+        title="Too many requests",
+        status=429,
+        detail=detail,
+        headers={"Retry-After": str(retry_after)},
+        retry_after=retry_after,
     )
 
 
@@ -194,7 +244,7 @@ def problem_for(error: DomainError) -> ProblemError:
                 detail="Another change to the same lot won the race. Retry the request.",
             )
         case HouseholdNotFoundError():
-            return unauthorized("The X-Household-Id header does not designate a known household.")
+            return unauthorized()
         case _:
             return ProblemError(
                 slug="invalid-request",
@@ -205,7 +255,7 @@ def problem_for(error: DomainError) -> ProblemError:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Install the four handlers that make every error path answer in one shape."""
+    """Install the handlers that make every error path answer in one shape."""
 
     async def handle_problem(_request: Request, exc: Exception) -> JSONResponse:
         assert isinstance(exc, ProblemError)
@@ -230,6 +280,10 @@ def register_exception_handlers(app: FastAPI) -> None:
             detail="The request body or parameters did not match the expected shape.",
             errors=errors,
         ).to_response()
+
+    async def handle_body_too_large(_request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, RequestBodyTooLarge)
+        return problem_for_body_too_large(exc.limit_bytes).to_response()
 
     async def handle_http_exception(_request: Request, exc: Exception) -> JSONResponse:
         assert isinstance(exc, StarletteHTTPException)
@@ -259,5 +313,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ProblemError, handle_problem)
     app.add_exception_handler(DomainError, handle_domain_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
+    # Registered before its base class: Starlette resolves a handler by walking
+    # the exception's MRO, so the specific one has to exist for it to be found.
+    app.add_exception_handler(RequestBodyTooLarge, handle_body_too_large)
     app.add_exception_handler(StarletteHTTPException, handle_http_exception)
     app.add_exception_handler(Exception, handle_unexpected)

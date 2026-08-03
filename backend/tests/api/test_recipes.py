@@ -33,6 +33,7 @@ from chaudron.domain.models import (
 )
 from chaudron.infra.llm import doubles
 from chaudron.infra.llm.factory import LlmProviderFactory
+from chaudron.infra.llm.prompts import PROMPT_VERSION
 from chaudron.infra.llm.settings import LlmSettings
 from chaudron.services.providers import ProviderPorts, ProviderPortsBuilder
 from tests.api.conftest import MakeLocation, MakeProduct
@@ -167,7 +168,10 @@ async def test_suggestions_are_returned_persisted_and_re_checked_against_the_sto
     assert str(row.id) == recipe["id"], "the client's identifier is the stored row"
     assert row.provider_mode is LlmProviderMode.INSTANCE_OWNER
     assert (row.provider_code, row.model) == ("openai", "gpt-4o")
-    assert row.prompt_version == "recipes-1"
+    # Against the constant, not a literal: the point of the column is that the
+    # version moves when the prompt does, so pinning the literal here only means a
+    # deliberate bump breaks an unrelated test.
+    assert row.prompt_version == PROMPT_VERSION
     assert row.llm_provider_config_id == config.id
     assert row.status is RecipeStatus.GENERATED
     assert row.latency_ms is not None

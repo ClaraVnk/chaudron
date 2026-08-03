@@ -105,9 +105,42 @@ class Settings(BaseSettings):
     inbound_email_domain: str | None = None
     inbound_email_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
 
+    # -- Abuse and availability limits -------------------------------------- #
+    # See ``api/throttling.py`` for what these bound and, just as importantly,
+    # what they do not: the counters are per process.
+
+    #: 256 KiB. The largest legitimate v1 request is an inventory creation with an
+    #: inline product, which is under a kilobyte; a hundredfold margin absorbs any
+    #: reasonable growth of the JSON contract. It is *not* sized for the receipt
+    #: photo import: ``CHAUDRON_INBOUND_EMAIL_MAX_BYTES`` (10 MiB by default) is the
+    #: order of magnitude that route will need, and raising it globally to reach it
+    #: would hand every JSON endpoint a forty-times larger memory footprint. That
+    #: route must carry its own, higher, per-route bound when it is written.
+    max_request_body_bytes: int = Field(default=256 * 1024, ge=1024)
+
+    #: Recipe suggestions per household per hour. Each one is a billed inference.
+    recipe_suggestions_per_hour: int = Field(default=10, ge=1)
+    #: In-flight suggestions per household. Two open browser tabs must not double
+    #: the bill; one is unusably strict when a request takes half a minute.
+    recipe_max_concurrent_per_household: int = Field(default=2, ge=1)
+    #: In-flight suggestions for the whole process. The ceiling that keeps a
+    #: colocated Ollama on a small machine from being asked for six generations at
+    #: once (ADR-0007, and the OOM-kill documented in ``infra/llm/settings.py``).
+    recipe_max_concurrent_total: int = Field(default=4, ge=1)
+
+    #: Barcode lookups per household per minute. Must stay **below** the ten calls
+    #: per minute that ``infra/openfoodfacts.py`` allows the whole instance, or one
+    #: household can still drain the shared budget on its own (ADR-0008).
+    product_lookups_per_minute: int = Field(default=6, ge=1)
+
     # -- CORS --------------------------------------------------------------- #
     cors_origins: CommaSeparated = Field(default_factory=list)
     cors_allow_credentials: bool = False
+
+    # -- Documentation ------------------------------------------------------ #
+    #: ``None`` means "local only". An explicit value is a decision, which is what
+    #: exposing every route and schema without authentication deserves.
+    enable_docs: bool | None = None
 
     # -- Normalisation and cross-field rules -------------------------------- #
 
@@ -182,22 +215,52 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _reject_wildcard_with_credentials(self) -> Settings:
-        """``Access-Control-Allow-Origin: *`` plus credentials is not a valid pair.
+    def _reject_wildcard_origin(self) -> Settings:
+        """``Access-Control-Allow-Origin: *`` is never right for this API.
 
-        Browsers refuse the combination, so the practical outcome of configuring
-        it is a CORS failure nobody can explain from the server logs.
+        The pairing with credentials is refused by browsers outright, so
+        configuring it produces a CORS failure nobody can explain from the server
+        logs. But the wildcard is wrong here even *without* credentials: this
+        API's authorisation travels in ``X-Household-Id``, a custom header, not in
+        a cookie. ``allow_credentials=False`` therefore protects nothing --
+        ``*`` would let any page on the internet issue reads against a household
+        whose identifier it knows, and read the answers. Origins are listed.
         """
-        if self.cors_allow_credentials and "*" in self.cors_origins:
+        if "*" in self.cors_origins:
             raise ValueError(
-                "CHAUDRON_CORS_ALLOW_CREDENTIALS cannot be true while "
-                "CHAUDRON_CORS_ORIGINS contains '*': list the origins explicitly"
+                "CHAUDRON_CORS_ORIGINS cannot contain '*': this API is authorised by a "
+                "custom header rather than by cookies, so a wildcard origin lets any site "
+                "read a household's data. List the origins explicitly"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _keep_concurrency_caps_consistent(self) -> Settings:
+        """A per-household cap above the process-wide one is a contradiction."""
+        if self.recipe_max_concurrent_total < self.recipe_max_concurrent_per_household:
+            raise ValueError(
+                "CHAUDRON_RECIPE_MAX_CONCURRENT_TOTAL cannot be below "
+                "CHAUDRON_RECIPE_MAX_CONCURRENT_PER_HOUSEHOLD"
             )
         return self
 
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @property
+    def docs_enabled(self) -> bool:
+        """Whether ``/docs`` and ``/openapi.json`` are served.
+
+        Defaults closed everywhere but ``local``. A ``staging`` instance carries
+        real data far more often than anyone admits, and the default value of
+        ``env`` is ``local`` -- so a variable forgotten at deployment used to open
+        the documentation rather than close it (audit AUD-018). A default that
+        fails towards "exposed" is not an acceptable default.
+        """
+        if self.enable_docs is not None:
+            return self.enable_docs
+        return self.env == "local"
 
 
 @lru_cache(maxsize=1)

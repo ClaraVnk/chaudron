@@ -11,11 +11,15 @@ review time is the scarcest resource here.
 
 ## 1. Where the project is right now
 
-**Chaudron is in the scoping phase.** This repository contains architecture
-documents, architecture decision records, a project skeleton, container units
-and a CI pipeline. It contains **no feature code**: there is no working
-application, no release, and nothing to install and use. Do not expect to run it
-and get recipe suggestions.
+**The first slice works; the product does not exist yet.** You can clone this,
+run it, add stock by scanning a barcode and get recipe suggestions out of a real
+model. What you cannot do is expose it: there is **no authentication**, and the
+API identifies a household by a header, which is an address rather than a proof.
+
+Receipt import, the shopping list, editing an item after it is added, and
+accounts are all designed and none are built. The
+[security audit](docs/security-audit-2026-08.md) is the honest inventory of
+where the sharp edges are.
 
 That shapes what is useful today.
 
@@ -145,25 +149,34 @@ commit it.
 
 ### 2.5 What does not work yet, and why that is expected
 
-`backend/src/chaudron/domain/models.py` holds the full schema — 17 tables, and it
-does create against a real PostgreSQL 16. Everything above it is still empty.
-So:
+The API, the PWA and four Alembic migrations exist and run. What is missing is
+missing on purpose, not half-done:
 
-- **There is no ASGI application to serve**, and no Alembic migration yet. The
-  schema exists as SQLAlchemy metadata; the first migration has to be generated
-  from it.
-- **The four checks below all pass today.** `uv run pytest` reports roughly
-  `55 passed, 145 skipped`. Every skip carries a reason: most are the LLM adapter
-  conformance suite waiting for its first adapter, the rest are documented
-  tenancy exemptions. A skip without a reason is a bug — do not add one.
-- **The conformance suite arms itself.** Register an adapter in
-  `chaudron.infra.llm.contract.CONTRACT_ADAPTERS` and 140 skipped tests start
-  running against it. See `backend/tests/README.md`.
-- The frontend job in CI detects the absence of `frontend/package.json` and skips
-  itself.
+- **No authentication.** Deliberate for this slice, and the reason the app must
+  not be exposed. Anything you build should not assume a trusted identity.
+- **No write endpoint for a household's API key.** The service that seals and
+  stores one exists and is tested; the HTTP route does not, because
+  `docs/api-contract-v1.md` was frozen before it and the frontend is written
+  against that contract. Extending the contract is the first step, not a
+  workaround.
+- **No receipt import, no shopping list, no item editing.**
+- **`uv run pytest` reports `533 passed, 70 skipped`.** Every skip carries a
+  reason — mostly `live_provider` suites that would cost real money, and
+  documented tenancy exemptions. A skip without a reason is a bug; do not add
+  one.
+- **The adapter conformance suite arms itself.** Register an adapter in
+  `chaudron.infra.llm.contract.CONTRACT_ADAPTERS` and its tests start running
+  against it. See `backend/tests/README.md`.
 
-So the commands in §3 are meaningful now: run them before you push, and expect
-them green.
+Two things worth knowing before you touch the provider layer, both found by
+running against a real Ollama rather than by reading:
+
+- **A green suite does not mean the wire is right.** The hand-written doubles
+  once encoded an assumption — that `/api/version` answered POST — which real
+  Ollama refuses with a 405. Every household using Ollama was unconfigurable and
+  nothing failed.
+- **Row-level security enforces nothing while the app connects as the table
+  owner.** Silently. `ops/README.md` §6 has the check; run it.
 
 ---
 

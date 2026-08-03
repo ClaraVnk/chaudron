@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
-from chaudron.api.deps import HouseholdDep, ProductServiceDep
+from chaudron.api.deps import HouseholdDep, ProductServiceDep, enforce_product_lookup_limit
 from chaudron.api.schemas import ProductCreateIn, ProductDetailOut
 from chaudron.domain.ports import GTIN_STORAGE_LENGTH, ProductDraft, ProductView, display_gtin
 
@@ -25,7 +25,12 @@ def _to_out(product: ProductView) -> ProductDetailOut:
     )
 
 
-@router.get("/lookup", response_model=ProductDetailOut, summary="Resolve a barcode")
+@router.get(
+    "/lookup",
+    response_model=ProductDetailOut,
+    summary="Resolve a barcode",
+    dependencies=[Depends(enforce_product_lookup_limit)],
+)
 async def lookup_product(
     household_id: HouseholdDep,
     service: ProductServiceDep,
@@ -36,7 +41,9 @@ async def lookup_product(
     ``household_id`` is required even though the answer is not tenant-scoped:
     the shared catalogue is a resource of this instance, and letting unauthenticated
     callers drive its outbound requests would hand a stranger the instance's whole
-    rate-limit budget (ADR-0008).
+    rate-limit budget (ADR-0008). It is also the key the per-household inbound
+    limit counts on -- ``429`` with ``Retry-After`` past it, so that the outbound
+    budget stops being the first thing to saturate.
     """
     return _to_out(await service.lookup_by_barcode(gtin))
 

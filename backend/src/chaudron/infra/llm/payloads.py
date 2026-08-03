@@ -9,6 +9,16 @@ shaped*, so a malformed answer fails in one place with one error type.
 Validation here is hand-written rather than delegated to a JSON-Schema library. The
 schemas are small, fixed and reviewed; a dependency whose failure messages we would
 have to sanitise anyway (they quote the offending payload) is not worth its cost.
+
+The readers **bound** what they accept as well as shaping it. ADR-0005 already says
+the model's answer is untrusted, and the security audit gives that a second reason:
+a poisoned catalogue label can steer the answer (AUD-006), so the size of the answer
+is under an attacker's influence too. A schema that constrains the *shape* but not
+the *size* lets one suggestion arrive with ten thousand steps, be persisted, and be
+rendered. Fields are truncated and collections are sliced rather than rejected: the
+household gets a slightly clipped recipe instead of an error, and nothing unbounded
+crosses the boundary. The bounds are generous enough that no honest answer meets
+them, which is what makes truncation the right response instead of a refusal.
 """
 
 from __future__ import annotations
@@ -27,13 +37,29 @@ from chaudron.domain.llm_ports import (
     RecipeSuggestion,
 )
 from chaudron.infra.llm.redaction import snippet
+from chaudron.infra.untrusted_text import sanitize_optional
 
 __all__ = [
+    "MAX_STEPS_PER_SUGGESTION",
+    "MAX_SUGGESTIONS_READ",
     "RECEIPT_SCHEMA",
     "RECIPE_SCHEMA",
     "read_receipt",
     "read_recipes",
 ]
+
+#: Ceilings on the model's answer. Not in the JSON Schemas themselves: several
+#: providers reject a schema carrying ``maxLength``/``maxItems`` in strict
+#: constrained-decoding mode, and a bound the server enforces holds for the
+#: emulated path too, where nothing constrains the model at all.
+MAX_SUGGESTIONS_READ: Final = 10
+MAX_INGREDIENTS_PER_SUGGESTION: Final = 60
+MAX_STEPS_PER_SUGGESTION: Final = 40
+MAX_TITLE_CHARS: Final = 200
+MAX_SUMMARY_CHARS: Final = 2000
+MAX_STEP_CHARS: Final = 1000
+MAX_SHORT_FIELD_CHARS: Final = 120
+MAX_RECEIPT_LINES: Final = 300
 
 #: ``additionalProperties: false`` and an explicit ``required`` everywhere: that is
 #: what makes a schema usable for strict constrained decoding on the providers that
@@ -155,6 +181,29 @@ def _optional_str(value: object) -> str | None:
     return None
 
 
+def _bounded_list(value: object, limit: int) -> list[Any]:
+    """A list of at most ``limit`` entries, or nothing.
+
+    Anything that is not a list becomes empty rather than being iterated: the
+    schema asks for an array, and a model that sent an object here has not sent an
+    array with one entry.
+    """
+    if not isinstance(value, list):
+        return []
+    return value[:limit]
+
+
+def _bounded_str(value: object, limit: int) -> str | None:
+    """:func:`_optional_str`, then reduced to one bounded line.
+
+    The same treatment the catalogue gets, for the same reason: this text is
+    displayed, stored, and partly chosen by whoever influenced the prompt. Control
+    and format characters go -- a model will happily echo back the invisible tag
+    characters an injection arrived in.
+    """
+    return sanitize_optional(_optional_str(value), limit=limit)
+
+
 def _optional_int(value: object) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -212,38 +261,39 @@ def read_recipes(raw: str, *, context: ProviderContext | None = None) -> list[Re
     payload = _load(raw, context)
     entries = _require_list(payload, "suggestions", context)
     suggestions: list[RecipeSuggestion] = []
-    for index, entry in enumerate(entries):
+    for index, entry in enumerate(entries[:MAX_SUGGESTIONS_READ]):
         if not isinstance(entry, dict):
             raise _invalid(f"suggestion #{index} is not an object", context)
-        title = _optional_str(entry.get("title"))
+        title = _bounded_str(entry.get("title"), MAX_TITLE_CHARS)
         if title is None:
             raise _invalid(f"suggestion #{index} has no title", context)
         ingredients: list[RecipeIngredient] = []
-        for item in entry.get("ingredients") or []:
+        for item in _bounded_list(entry.get("ingredients"), MAX_INGREDIENTS_PER_SUGGESTION):
             if not isinstance(item, dict):
                 continue
-            name = _optional_str(item.get("name"))
+            name = _bounded_str(item.get("name"), MAX_SHORT_FIELD_CHARS)
             if name is None:
                 continue
             ingredients.append(
                 RecipeIngredient(
                     name=name,
-                    amount=_optional_str(item.get("amount")),
-                    unit=_optional_str(item.get("unit")),
+                    amount=_bounded_str(item.get("amount"), MAX_SHORT_FIELD_CHARS),
+                    unit=_bounded_str(item.get("unit"), MAX_SHORT_FIELD_CHARS),
                     in_stock=bool(item.get("in_stock", False)),
                 )
             )
         steps = tuple(
-            step.strip()
-            for step in entry.get("steps") or []
-            if isinstance(step, str) and step.strip()
+            cleaned
+            for step in _bounded_list(entry.get("steps"), MAX_STEPS_PER_SUGGESTION)
+            if isinstance(step, str)
+            and (cleaned := sanitize_optional(step, limit=MAX_STEP_CHARS)) is not None
         )
         if not steps:
             raise _invalid(f"suggestion {title!r} has no steps", context)
         suggestions.append(
             RecipeSuggestion(
                 title=title,
-                summary=_optional_str(entry.get("summary")),
+                summary=_bounded_str(entry.get("summary"), MAX_SUMMARY_CHARS),
                 duration_minutes=_optional_int(entry.get("duration_minutes")),
                 servings=_optional_int(entry.get("servings")),
                 ingredients=tuple(ingredients),
@@ -266,25 +316,25 @@ def read_receipt(raw: str, *, context: ProviderContext | None = None) -> ParsedR
     payload = _load(raw, context)
     entries = _require_list(payload, "lines", context)
     lines: list[ReceiptLine] = []
-    for index, entry in enumerate(entries):
+    for index, entry in enumerate(entries[:MAX_RECEIPT_LINES]):
         if not isinstance(entry, dict):
             raise _invalid(f"receipt line #{index} is not an object", context)
-        label = _optional_str(entry.get("label"))
+        label = _bounded_str(entry.get("label"), MAX_SHORT_FIELD_CHARS)
         if label is None:
             raise _invalid(f"receipt line #{index} has no label", context)
         lines.append(
             ReceiptLine(
                 label=label,
                 quantity=_optional_decimal(entry.get("quantity")),
-                unit=_optional_str(entry.get("unit")),
+                unit=_bounded_str(entry.get("unit"), MAX_SHORT_FIELD_CHARS),
                 unit_price=_optional_decimal(entry.get("unit_price")),
                 total_price=_optional_decimal(entry.get("total_price")),
             )
         )
-    currency = _optional_str(payload.get("currency"))
+    currency = _bounded_str(payload.get("currency"), MAX_SHORT_FIELD_CHARS)
     return ParsedReceipt(
         lines=tuple(lines),
-        merchant=_optional_str(payload.get("merchant")),
+        merchant=_bounded_str(payload.get("merchant"), MAX_SHORT_FIELD_CHARS),
         purchased_on=_optional_date(payload.get("purchased_on")),
         currency=currency.upper()[:3] if currency else None,
         total=_optional_decimal(payload.get("total")),

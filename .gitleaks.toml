@@ -3,6 +3,13 @@
 # Extends the default rule set rather than replacing it: the point of the CI job
 # is to catch a real credential, and a hand-written rule list would quietly stop
 # catching whatever it forgot.
+#
+# Nothing here can be made scan-mode specific, and that constrains everything
+# below: an entry in this file filters findings in `gitleaks git` — the history
+# pass, the only one that guards against a leak that actually landed — exactly
+# as it does in `gitleaks dir`. So every entry has to be safe for the history
+# pass. For silencing a local, gitignored `.env` during a working-tree scan, see
+# the note at the end of this file.
 
 [extend]
 useDefault = true
@@ -16,21 +23,50 @@ doubles inject a key into provider error messages and the suite requires it not
 to reappear in the message, the repr, `__cause__` or the redacted output. A test
 that proves a key is never leaked needs a key to not leak.
 
-Every value below is self-describing prose rather than a plausible token, and
-none authenticates anywhere. They are allowlisted by path so that a real key
-committed to application code is still caught.
+Every value is self-describing prose rather than a plausible token, and none
+authenticates anywhere. Only the two files that hold them are excused.
+
+Scoped by path and by path only. This block used to carry `regexes` for the two
+fake-key shapes as well, which was strictly worse: a global allowlist regex
+applies to every file in the repository and in every commit of its history, so
+`sk-ant-api03-[a-z0-9-]*key[a-z0-9-]*` would have swallowed a genuine all-
+lowercase Anthropic key wherever it was committed. The regexes bought nothing
+the paths did not already cover — the fake keys live in these two files — so
+they are gone rather than narrowed.
+
+Narrowing them instead, by pairing paths and regexes under `condition = "AND"`,
+is not available here: gitleaks 8.24.3 (pinned in ci.yml) honours `condition`
+and the `[[allowlists]]` array only inside `[[rules.allowlists]]`. A top-level
+`[[allowlists]]` block parses without complaint and is then ignored — verified
+against the pinned binary — which is the worst possible failure mode for a
+security control. Revisit if the pinned version ever moves.
 """
 paths = [
   '''backend/tests/.*\.py''',
   '''backend/src/chaudron/infra/llm/doubles\.py''',
-  # `gitleaks dir` walks the filesystem and does not honour .gitignore, so a
-  # developer's local `.env` trips it every time. That file is gitignored and can
-  # never reach a commit — the `gitleaks git` pass, which scans what actually
-  # landed in history, is the one that guards against a real leak and is left
-  # untouched by this entry.
-  '''(^|/)\.env(\.[^/]+)?$''',
 ]
-regexes = [
-  '''sk-ant-api03-[a-z0-9-]*(household|key|the-|replacement)[a-z0-9-]*''',
-  '''sk-ant-contract-DOUBLE-\d+''',
-]
+
+# ---------------------------------------------------------------------------
+# Local working-tree scans and your own `.env`
+# ---------------------------------------------------------------------------
+# `gitleaks dir` walks the filesystem and does not honour .gitignore, so a
+# developer's local `.env` is reported every time. It must NOT be allowlisted
+# here: the same entry applies to `gitleaks git`, and a `.env` committed by
+# accident — `git add -f` is all it takes — would then scan clean. That is the
+# one thing this file exists to catch, and it was verified both ways: with the
+# entry present a committed `.env` reports "no leaks found"; without it, the two
+# keys inside are reported.
+#
+# Take the exception for that one command instead, leaving the committed
+# configuration strict (run from the repository root):
+#
+#   GITLEAKS_CONFIG_TOML="[extend]
+#   useDefault = true
+#   [allowlist]
+#   paths = ['''backend/tests/.*\.py''', '''.*doubles\.py''', '''(^|/)\.env\$''']" \
+#     gitleaks dir . --redact --exit-code 1
+#
+# (Literal '''…''' strings, not \"\"\"…\"\"\": TOML rejects `\.` inside a basic
+# string. The shell needs the outer quotes to be double, hence the escaped `$`.)
+#
+# CI needs none of this: the checkout never contains a `.env`.

@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from chaudron.api.deps import HouseholdDep, RecipeServiceDep
+from chaudron.api.deps import HouseholdDep, RecipeServiceDep, enforce_recipe_limits
 from chaudron.api.errors import ProblemError
 from chaudron.api.schemas import (
     RecipeIngredientOut,
@@ -42,6 +42,10 @@ router = APIRouter(prefix="/v1/recipes", tags=["recipes"])
     "/suggest",
     response_model=SuggestRecipesOut,
     summary="Suggest recipes from the current stock",
+    # The only endpoint whose cost is money rather than milliseconds. The guard
+    # runs before the household's provider is even resolved, and holds a
+    # concurrency slot for the whole call (``api/throttling.py``).
+    dependencies=[Depends(enforce_recipe_limits)],
 )
 async def suggest_recipes(
     household_id: HouseholdDep, service: RecipeServiceDep, payload: SuggestRecipesIn

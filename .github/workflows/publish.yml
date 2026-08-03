@@ -1,4 +1,4 @@
-# Publishes the API image to GHCR on every push to `main`.
+# Publishes the API image to GHCR from commits that are already on `main`.
 #
 # The production host does not pull from here directly on a schedule of its own
 # choosing: `podman-auto-update.timer` polls this registry every 15 minutes and
@@ -6,26 +6,36 @@
 #
 # Consequence to keep in mind: anything merged to `main` reaches production
 # within 15 minutes, with no human gate. The protections are (a) this workflow
-# refusing to publish unless CI passed, and (b) Podman rolling the container
-# back automatically when the new image fails its health check.
+# refusing to publish unless CI passed on a commit that is reachable from
+# `main` in this repository, (b) the image being signed with cosign so the
+# operator can prove where a digest came from, and (c) Podman rolling the
+# container back automatically when the new image fails its health check.
 name: publish
 
 on:
   workflow_run:
-    workflows: ["ci"]
+    # Must match `name:` in ci.yml.
+    workflows: ["CI"]
     types: [completed]
+    # This filter matches the *head branch of the triggering run*, not a branch
+    # of this repository: a pull request from a fork whose branch is called
+    # `main` satisfies it. It is kept as a cheap first cut, never as a control.
+    # The real gate is the `if:` below plus the ancestry check in the job.
     branches: [main]
   # Manual re-publish, e.g. to force a rollback to a known-good commit.
   workflow_dispatch:
     inputs:
       ref:
-        description: "Commit SHA or tag to build and publish as :latest"
+        description: "Commit SHA (7-40 hex chars) already on main, to publish as :latest"
         required: true
         type: string
 
 permissions:
   contents: read
   packages: write
+  # Keyless cosign signing: the runner exchanges this OIDC token for a
+  # short-lived Fulcio certificate. No signing key is ever stored anywhere.
+  id-token: write
 
 concurrency:
   group: publish-main
@@ -33,60 +43,174 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   publish:
     name: Build and push to GHCR
     runs-on: ubuntu-latest
-    # Never publish an image whose CI run failed. `workflow_run` fires on
-    # completion regardless of outcome, so this guard is load-bearing.
+    # Three conditions, none of which is sufficient alone. A `workflow_run`
+    # payload describes a run that happened *in this repository* but may have
+    # been produced by somebody else's code, and each field closes a different
+    # hole:
+    #
+    #   conclusion == 'success'   — CI actually passed. `workflow_run` fires on
+    #                               completion regardless of outcome.
+    #   event == 'push'           — the triggering run was not a pull request.
+    #                               Fork code only ever reaches CI through a
+    #                               `pull_request` run, so this is what stops an
+    #                               attacker who names their fork branch `main`.
+    #   head_repository == repo   — the code came from this repository. Redundant
+    #                               with the line above *today*; it stops being
+    #                               redundant the day ci.yml gains a trigger that
+    #                               runs fork code under a non-`pull_request`
+    #                               event (`pull_request_target`, a scheduled
+    #                               run over a fork ref, …).
+    #
+    # What none of them can express is "this commit is on main": the payload
+    # only carries the branch *name* the run reported. That is verified against
+    # the repository itself in the first step of the job, before any file from
+    # the built commit exists on disk.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     steps:
-      - name: Resolve ref to build
+      # Checked out at `main`, deliberately not at the ref being published: the
+      # ref is validated against this history before it is ever materialised, so
+      # a commit that is not on `main` never lands in the workspace.
+      - name: Check out main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: main
+          # Full history: `merge-base --is-ancestor` needs the ancestors of main.
+          fetch-depth: 0
+          # The token is not needed after checkout, and this job builds code and
+          # runs a registry client — nothing that should inherit push rights.
+          persist-credentials: false
+
+      - name: Resolve and verify the ref to build
         id: ref
+        env:
+          # Never interpolate `${{ }}` into a run block: `inputs.ref` is operator
+          # input and would be evaluated by the shell before it is a string.
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_REF: ${{ inputs.ref }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "sha=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            REF="$DISPATCH_REF"
           else
-            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            REF="$WORKFLOW_RUN_SHA"
           fi
 
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.ref.outputs.sha }}
+          # Hex only: rejects shell metacharacters and ref names alike. Tags are
+          # not accepted on purpose — a tag can be moved, a commit SHA cannot.
+          if ! [[ "$REF" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "::error::'$REF' is not a commit SHA (7-40 lowercase hex characters)."
+            exit 1
+          fi
+
+          # Fails when the object is unknown to this clone, which is the case for
+          # any commit that is not an ancestor of main — a fork's pull request
+          # head, for instance.
+          if ! SHA="$(git rev-parse --verify --quiet "${REF}^{commit}")"; then
+            echo "::error::$REF is not a commit of this repository's main history."
+            exit 1
+          fi
+
+          # Belt and braces: the object could be reachable from some other ref
+          # that a full-depth fetch happened to bring along.
+          if ! git merge-base --is-ancestor "$SHA" HEAD; then
+            echo "::error::$SHA is not reachable from refs/heads/main; refusing to publish."
+            exit 1
+          fi
+
+          git checkout --detach --quiet "$SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "short=${SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "Publishing $SHA (reachable from main)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve image name
+        env:
+          # GHCR rejects any uppercase character in a repository name, while
+          # `github.repository` preserves the owner's casing (`ClaraVnk/…`).
+          # Lowercasing here keeps the name in step with ops/*.container, which
+          # both reference ghcr.io/claravnk/chaudron.
+          REPOSITORY: ${{ github.repository }}
+        run: echo "IMAGE=${REGISTRY}/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          printf '%s' "${{ secrets.GITHUB_TOKEN }}" \
-            | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          set -euo pipefail
+          # cosign reads $DOCKER_CONFIG/config.json; Podman writes its own file
+          # under $XDG_RUNTIME_DIR unless told otherwise. Point both at the same
+          # place so one login serves the push and the signature.
+          mkdir -p "${RUNNER_TEMP}/docker"
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker" >> "$GITHUB_ENV"
+          echo "REGISTRY_AUTH_FILE=${RUNNER_TEMP}/docker/config.json" >> "$GITHUB_ENV"
+          printf '%s' "$GHCR_TOKEN" \
+            | podman login "$REGISTRY" -u "$GHCR_USER" --password-stdin \
+                --authfile "${RUNNER_TEMP}/docker/config.json"
 
       - name: Build image
+        env:
+          SHA: ${{ steps.ref.outputs.sha }}
+          SHORT: ${{ steps.ref.outputs.short }}
         run: |
-          SHA="${{ steps.ref.outputs.sha }}"
+          set -euo pipefail
           podman build \
             --format docker \
             --file backend/Containerfile \
-            --tag "${IMAGE}:${SHA::12}" \
+            --tag "${IMAGE}:${SHORT}" \
             --tag "${IMAGE}:latest" \
             --label "org.opencontainers.image.revision=${SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.licenses=AGPL-3.0-or-later" \
             backend
 
+      # The immutable tag carries the same 12-character SHA the build was tagged
+      # with. Pushing the full 40-character SHA, as this step used to, pushed a
+      # tag that had never been created.
       - name: Push immutable tag
-        run: podman push "${IMAGE}:${{ steps.ref.outputs.sha }}"
+        env:
+          SHORT: ${{ steps.ref.outputs.short }}
+        run: podman push --digestfile "${RUNNER_TEMP}/digest" "${IMAGE}:${SHORT}"
 
       # `:latest` is pushed last and on its own: it is the tag production
       # follows, so it must never move to a digest that was not fully pushed.
       - name: Push rolling tag
         run: podman push "${IMAGE}:latest"
 
-      - name: Report published digest
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      # Signed by digest, never by tag: a signature bound to `:latest` would say
+      # nothing about the bytes a puller actually receives. The identity that
+      # ends up in the certificate is this workflow's ref in this repository, so
+      # a leaked GHCR token cannot produce a signature that verifies — see
+      # ops/README.md for the command that checks it.
+      - name: Sign the image with cosign (keyless)
+        env:
+          COSIGN_YES: "true"
         run: |
-          DIGEST=$(podman image inspect "${IMAGE}:latest" --format '{{ .Digest }}')
-          echo "Published ${IMAGE}:latest → ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Immutable tag: ${IMAGE}:${{ steps.ref.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Production will pick this up within 15 minutes." >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          DIGEST="$(cat "${RUNNER_TEMP}/digest")"
+          cosign sign "${IMAGE}@${DIGEST}"
+          echo "DIGEST=${DIGEST}" >> "$GITHUB_ENV"
+
+      - name: Report published digest
+        env:
+          SHA: ${{ steps.ref.outputs.sha }}
+          SHORT: ${{ steps.ref.outputs.short }}
+        run: |
+          {
+            echo "Published ${IMAGE}:latest → ${DIGEST}"
+            echo "Immutable tag: ${IMAGE}:${SHORT} (commit ${SHA})"
+            echo "Signed keyless as ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/publish.yml@${GITHUB_REF}"
+            echo "Production will pick this up within 15 minutes."
+          } >> "$GITHUB_STEP_SUMMARY"

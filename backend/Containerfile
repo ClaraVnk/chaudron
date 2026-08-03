@@ -18,7 +18,14 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_NO_DEV=1
 
-WORKDIR /build
+# The venv is built at the path it will be used from, and that is not cosmetic.
+# A console script installed by pip/uv carries an absolute shebang: building in
+# /build produced `#!/build/.venv/bin/python` in every entry point, a path that
+# does not exist in the runtime stage. The image then failed to start at all —
+# `sh: exec: uvicorn: not found`, because the interpreter behind the shebang is
+# what is missing, not the script — and `alembic` was equally unusable. Keep
+# this WORKDIR identical to the runtime WORKDIR.
+WORKDIR /app
 
 # Dependency manifests first: this layer is cached until the lockfile changes.
 COPY pyproject.toml uv.lock ./
@@ -47,12 +54,26 @@ RUN groupadd --system --gid 10001 chaudron \
 
 WORKDIR /app
 
-COPY --from=builder --chown=chaudron:chaudron /build/.venv /app/.venv
+# Owned by root, not by the account that runs the code. The application only
+# ever needs to read its own interpreter and libraries, so making them writable
+# by `chaudron` bought nothing and handed any code-execution bug a place to
+# persist: a rewritten module, or a poisoned `__pycache__/*.pyc` that CPython
+# accepts as valid while `git status` stays clean. `ReadOnly=true` in the
+# quadlet closes the same door, but only for deployments that remember to set
+# it — this closes it in the image itself.
+COPY --from=builder --chown=root:root /app/.venv /app/.venv
 
-# When Alembic lands, add here:
-#   COPY --chown=chaudron:chaudron alembic.ini /app/
-#   COPY --chown=chaudron:chaudron migrations /app/migrations
-# Migrations are run as a separate one-shot unit, never from the app entrypoint.
+# Alembic configuration and revision scripts. `chaudron-migrate.container` runs
+# `alembic upgrade head` from this image with WORKDIR=/app; without these two
+# lines that unit fails with "No config file 'alembic.ini' found", which is to
+# say the documented deployment path for a release carrying a migration did not
+# work. Root-owned and read-only to the application, like everything else here.
+COPY --chown=root:root alembic.ini /app/
+COPY --chown=root:root migrations /app/migrations
+
+# Any __pycache__ the build context happened to carry is stale by definition and
+# has no business in a release artefact.
+RUN find /app/migrations -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 USER chaudron
 

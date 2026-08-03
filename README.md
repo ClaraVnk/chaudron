@@ -20,13 +20,17 @@ scanning — running on *your* model, *your* key, *your* server.
 ---
 
 > [!WARNING]
-> **Chaudron is in the scoping phase.** This repository currently contains the
-> architecture, the decision records and the project baseline — **not a working
-> application**. There is nothing to install yet. Issues and feedback on the
-> design are the most valuable contribution right now.
+> **Early, and not safe to expose to the internet yet.**
 >
-> Start with [`docs/architecture.md`](docs/architecture.md) and
-> [`docs/adr/`](docs/adr/).
+> The first slice works end to end — inventory, barcode scanning, recipe
+> suggestions from a real model — and the screenshots below are of it running.
+> But there is **no authentication**: the current API identifies a household by
+> a header, which is an address, not a proof. Run it on a private network or
+> behind your own auth until that lands. See
+> [the security audit](docs/security-audit-2026-08.md), finding AUD-001.
+>
+> Not built yet: receipt import, the shopping list, and any way to edit an item
+> once it is added.
 
 ---
 
@@ -44,13 +48,16 @@ application never pays for anyone's inference and never sees anyone's data.
 
 | | |
 |---|---|
-| 📦 **Stock tracking** | What you own, where it's stored, and when it expires — per household, not per person. |
-| 📷 **Barcode scanning** | Point your phone's camera at a barcode. Products resolve through [Open Food Facts](https://world.openfoodfacts.org/). |
-| 🧾 **Receipt import** | Photograph a till receipt; a vision model extracts the lines. **Nothing is written without your review.** |
-| 🍳 **Recipe suggestions** | Generated from the stock actually on hand, not from a generic database. |
-| 🛒 **Shopping list** | Built from what ran out, exportable to the tools you already use. |
-| 🔑 **Bring your own model** | Anthropic, OpenAI, Gemini, Mistral, or a local Ollama. Your key, your bill, your choice. |
-| 🏠 **Self-hosted** | Podman + systemd quadlets. Runs on a small VPS or a home server. |
+| | | |
+|---|---|---|
+| 📦 **Stock tracking** | ✅ built | What you own, where it's stored, and when it expires — per household, not per person. Use-by and best-before are distinct: conflating them means either anxious alerts on dry pasta or silence on minced beef. |
+| 📷 **Barcode scanning** | ✅ built | Decoded **in the browser** — the server only ever sees thirteen characters, never a video stream. Products resolve through [Open Food Facts](https://world.openfoodfacts.org/). |
+| 🍳 **Recipe suggestions** | ✅ built | Generated from the stock actually on hand. Whether an ingredient is in stock is **recomputed against your inventory**, never taken from the model's word for it. |
+| 🔑 **Bring your own model** | ✅ built | Anthropic, OpenAI, Gemini, Mistral, or a local Ollama. Your key, your bill, your choice. |
+| 🏠 **Self-hosted** | ✅ built | Podman + systemd quadlets, PostgreSQL row-level security. Runs on a small VPS or a home server. |
+| 🧾 **Receipt import** | ⏳ designed | Photograph a till receipt; a vision model extracts the lines. **Nothing will be written without your review** — a model that reads `PDT NOUV 1KG` is right about half the time, and a silently wrong stock is worse than an empty one. |
+| 🛒 **Shopping list** | ⏳ designed | Built from what ran out, exportable to the tools you already use. |
+| 🔐 **Accounts** | ❌ not started | The blocker for exposing this to the internet. |
 
 ## Bring your own model
 
@@ -128,21 +135,32 @@ layer knows nothing about SQLAlchemy, HTTP, or any model SDK — it declares
 interfaces, and infrastructure implements them. That is what makes three model
 providers possible without the recipe logic knowing any of them exist.
 
-Every business table carries a `household_id`, from the very first commit. See
-[ADR 0006](docs/adr/0006-multi-tenant-from-day-one.md).
+Every business table carries a `household_id`, from the very first commit — and
+since the security audit, PostgreSQL enforces it. A query that forgets its tenant
+filter now returns nothing because the *database* refuses it, not because the
+code remembered. See [ADR 0006](docs/adr/0006-multi-tenant-from-day-one.md).
 
 ## Screenshots
 
-> [!NOTE]
-> Not yet. There is no interface to photograph — see the status warning above.
-> This section will be filled with real captures of a running instance, never
-> with mockups presented as screenshots.
+Captures of the application running: real seeded stock, a real backend, and a
+real local model behind the suggestions. Nothing here is a mockup.
+
+| Inventory | Degraded mode | Add an item |
+|---|---|---|
+| <img src="docs/screenshots/inventory.png" alt="Inventory grouped by storage location" width="240"> | <img src="docs/screenshots/degraded-banner.png" alt="Banner explaining what the configured model cannot do" width="240"> | <img src="docs/screenshots/add.png" alt="Choice between scanning a barcode and manual entry" width="240"> |
+
+The middle one is the part worth looking at. That household is running
+`qwen2.5:3b` locally, so the app says — permanently, before anything is
+attempted — that receipt import is off because the model cannot read images,
+that instructions are not cached so every request bills more tokens, and that
+the context window only fits the items closest to expiry. You are told what you
+are getting, not shown an error once it fails.
 
 ## Quick start
 
 > [!IMPORTANT]
-> Not usable yet. These are the intended commands, kept here so the shape of the
-> project is clear. They will work when the first release ships.
+> No authentication yet (see the warning at the top). Run this on a machine you
+> control, not on a public address.
 
 Requires [uv](https://docs.astral.sh/uv/), Podman, and Node.js 22+.
 
@@ -158,21 +176,28 @@ podman run -d --name chaudron-db \
 
 # Backend
 cd backend && uv sync && uv run alembic upgrade head
+uv run python scripts/seed.py   # a demo household; prints the X-Household-Id to use
 uv run uvicorn chaudron.api.main:app --reload
 
 # Frontend
-cd frontend && npm install && npm run dev
+cd ../frontend && cp .env.example .env.local   # point it at the API, paste the household id
+npm install && npm run dev
 ```
 
 Liveness and readiness are separate endpoints on purpose: `/healthz` says the
 process is alive, `/readyz` says it can actually serve traffic.
+
+Row-level security ships enabled, but it only *enforces* once the application
+connects as a non-owning role — the table owner bypasses it, and nothing warns
+you. `ops/README.md` §6 has the provisioning steps and a `--check` command;
+run it, because a silent no-op is exactly what this control must never be.
 
 ## Development
 
 ```sh
 cd backend
 uv run ruff check . && uv run ruff format --check .
-uv run mypy src
+uv run mypy
 uv run pytest --cov
 ```
 
@@ -192,12 +217,31 @@ that bind mounts require.
 | [Data model](docs/data-model.md) | Entities, tenancy, units, expiry batches |
 | [Scanning notes](docs/technical-notes-scanning.md) | Barcode reading in-browser, camera in a PWA, Open Food Facts |
 | [Ingestion notes](docs/technical-notes-ingestion.md) | Inbound email, receipt OCR, shopping list export |
+| [API contract](docs/api-contract-v1.md) | The v1 endpoints, frozen before either side was written |
+| [Testing strategy](docs/testing-strategy.md) | Tenancy guards, the adapter conformance suite, what is deliberately not tested |
+| [Security model](docs/security-model.md) | Threat model, trust boundaries, what is *not* covered |
+| [Security audit](docs/security-audit-2026-08.md) | 35 findings against the running application, and what has been closed |
 | [Decision records](docs/adr/) | Why things are the way they are — including what it costs |
+
+## Security
+
+The application has been audited against a running instance, not just read: 35
+findings, 19 of them proven by exploitation rather than inferred. Closed since:
+the fork-triggered deployment path, the SSRF port oracle, prompt injection
+through the shared product catalogue, absent rate limiting on the endpoints that
+spend money, and application-only tenant isolation — now enforced by PostgreSQL.
+
+Open, and deliberately so: **there is no authentication**. Everything above
+assumes an identity layer that does not exist yet, which is why the warning at
+the top of this file is not boilerplate.
+
+The audit is committed in full, including the finding that turned out to be
+[wrong](docs/security-audit-2026-08.md) — a report you cannot check is not
+worth more than one you can.
 
 ## Contributing
 
-Feedback on the architecture is worth more than code right now. Read
-[CONTRIBUTING.md](CONTRIBUTING.md), and note the house rules: Conventional
+Read [CONTRIBUTING.md](CONTRIBUTING.md), and note the house rules: Conventional
 Commits, PostgreSQL only, Podman only, everything versioned in English, and no
 secrets ever.
 

@@ -153,7 +153,7 @@ async def test_short_context_trims_the_inventory_and_says_so() -> None:
     assert "80" in notice
     # And the trimming is not arbitrary: what is closest to spoiling is kept.
     sent = transport.requests[0].user
-    assert "Item 0 " in sent
+    assert '"Item 0"' in sent
     assert "Item 79" not in sent
 
 

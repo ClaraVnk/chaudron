@@ -82,7 +82,18 @@ Volume=%h/chaudron/data/uploads:/var/lib/chaudron/uploads:Z
 # Liveness probe. /healthz answers without touching PostgreSQL, so a database
 # outage does not restart the API. Readiness (/readyz, which does check the
 # database) is polled by the reverse proxy and by deployment gates.
-HealthCmd=python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"
+#
+# Quoting matters here, and not cosmetically. Quadlet strips a double quote that
+# ends the value, so `python -c "…"` was generated as
+#   --health-cmd "python\x20-c\x20\"import…else\x201)"
+# — an unterminated quoted string. Podman runs the probe through `/bin/sh -c`,
+# which answers `Syntax error: Unterminated quoted string` and reports the
+# container unhealthy forever. The whole auto-update story rests on this probe:
+# a permanently unhealthy container means every rolled-out image is rolled back,
+# and it means "the health check catches a broken deploy" was never true.
+# So: single quotes around the program, double quotes inside it. Verified with
+#   QUADLET_UNIT_DIRS=ops /usr/libexec/podman/quadlet -dryrun -user /tmp/out
+HealthCmd=python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=4).status == 200 else 1)'
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
