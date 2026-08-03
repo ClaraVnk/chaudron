@@ -1,0 +1,104 @@
+# Quadlet unit for the Pantry API (rootless).
+#
+# Install to:   ~/.config/containers/systemd/pantry.container
+# Reload with:  systemctl --user daemon-reload
+# Start with:   systemctl --user start pantry.service
+#
+# Generated unit name is derived from the filename: pantry.service.
+
+[Unit]
+Description=Pantry — API
+Documentation=https://github.com/ClaraVnk/pantry
+# Ordering only. Quadlet turns `Requires=` into a hard dependency; the API is
+# written to survive a database restart, so `Wants=` keeps a DB blip from
+# cascading into an API outage.
+After=pantry-db.service
+Wants=pantry-db.service
+
+[Container]
+ContainerName=pantry
+Image=ghcr.io/claravnk/pantry:latest
+
+# Continuous deployment. `podman-auto-update.timer` (overridden to every 15
+# minutes, see ops/README.md) compares the local digest against the registry and
+# restarts this service when `:latest` has moved.
+#
+# Podman rolls back to the previous image automatically when the new container
+# fails to become healthy — which is why the HealthCmd below is load-bearing
+# infrastructure, not a nicety. Note what that does NOT catch: an image that
+# starts cleanly, answers /healthz, and is functionally wrong still ships.
+AutoUpdate=registry
+
+# Same user-defined network as the database: podman network create pantry-net
+Network=pantry-net
+
+# Bound to loopback: TLS termination and public exposure belong to the
+# reverse proxy, not to this container.
+PublishPort=127.0.0.1:8000:8000
+
+# Non-secret 12-factor configuration. Copy .env.example, fill it in, and keep
+# it out of git. Secrets below override anything set here.
+EnvironmentFile=%h/pantry/pantry.env
+
+# Secrets injected as environment variables by Podman. Nothing secret may live
+# in the EnvironmentFile above: that file sits in $HOME next to the backups, so
+# a leaked backup would otherwise hand over the key that decrypts everything.
+#
+# Create each one with (note `printf '%s'`, never `echo`: `podman secret create`
+# keeps a trailing newline, which silently corrupts a key the moment it crosses
+# an HTTP header or an HTML form):
+#
+#   printf '%s' "$VALUE" | podman secret create <name> -
+#
+# PANTRY_CREDENTIAL_ENCRYPTION_KEY is the most sensitive value in the system: it
+# decrypts every provider API key the households have entrusted to this
+# instance. Generate with `openssl rand -base64 32`. Rotating it invalidates all
+# stored household credentials — see docs/security-model.md.
+Secret=pantry-credential-encryption-key,type=env,target=PANTRY_CREDENTIAL_ENCRYPTION_KEY
+
+# Database DSN — carries the password, so it is a secret, not configuration.
+Secret=pantry-database-url,type=env,target=PANTRY_DATABASE_URL
+
+# Session and token signing.
+Secret=pantry-secret-key,type=env,target=PANTRY_SECRET_KEY
+
+# Inbound-email webhook signature key. Without it, anyone can inject purchases
+# into any household.
+Secret=pantry-inbound-email-key,type=env,target=PANTRY_INBOUND_EMAIL_WEBHOOK_KEY
+
+# Provider keys for `instance_owner` mode ONLY — used by the operator's own
+# household, never shared with other households (see ADR-0007). Create only the
+# ones you actually use; a missing secret is a start-up failure, so comment out
+# the lines you do not need.
+Secret=pantry-anthropic-api-key,type=env,target=ANTHROPIC_API_KEY
+#Secret=pantry-openai-api-key,type=env,target=OPENAI_API_KEY
+#Secret=pantry-gemini-api-key,type=env,target=GEMINI_API_KEY
+#Secret=pantry-mistral-api-key,type=env,target=MISTRAL_API_KEY
+
+# Uploaded receipt images awaiting OCR. `:Z` is mandatory under SELinux
+# Enforcing; this directory is private to the API container.
+Volume=%h/pantry/data/uploads:/var/lib/pantry/uploads:Z
+
+# Liveness probe. /healthz answers without touching PostgreSQL, so a database
+# outage does not restart the API. Readiness (/readyz, which does check the
+# database) is polled by the reverse proxy and by deployment gates.
+HealthCmd=python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=20s
+
+# The image already runs as UID 10001; keep privilege escalation off.
+NoNewPrivileges=true
+DropCapability=ALL
+ReadOnly=true
+# Writable tmpfs for anything the process needs to scribble at runtime.
+Tmpfs=/tmp:rw,size=64M,mode=1777
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

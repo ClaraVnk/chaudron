@@ -1,0 +1,165 @@
+name: Bug report
+description: Something behaves differently from what the documentation, an ADR or the CI says it should.
+title: "bug: "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file this.
+
+        **Two things before you start.**
+
+        **1. Never paste a secret here.** Issues are public and permanent. That means no
+        provider API key (`sk-ant-...`, Gemini keys), no `PANTRY_SECRET_KEY`, no database
+        password or DSN with credentials in it, no JWT from a live session, no inbound-email
+        webhook key. Redact to a prefix and a length — `sk-ant-..., 108 chars` — and scrub
+        your logs before pasting them. If a real secret does end up here, say so immediately:
+        it has to be rotated, and editing the comment does not rotate it.
+
+        **2. If this is a security vulnerability, close this form.** Report it privately
+        instead: [SECURITY.md](https://github.com/ClaraVnk/pantry/blob/main/SECURITY.md).
+
+        Pantry is in the **scoping** phase — there is no release and no feature code yet, so
+        reports about documentation, ADRs, the CI pipeline, the container image or the ops
+        units are entirely legitimate here.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before submitting
+      options:
+        - label: This is not a security vulnerability (those go through a private advisory).
+          required: true
+        - label: I have removed every API key, password, token and credential from this report.
+          required: true
+        - label: I searched the existing issues and did not find this one.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: >-
+        A release tag if one exists, otherwise the commit SHA you are on
+        (`git rev-parse --short HEAD`).
+      placeholder: "a1b2c3d, or v0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      description: How is the instance running?
+      options:
+        - Local development (uv run, no container)
+        - Podman containers, run manually
+        - Podman rootless systemd quadlets (ops/README.md §2)
+        - CI only (GitHub Actions)
+        - Not running anything — this is about documentation or an ADR
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Configured model provider
+      description: >-
+        Which model access is the affected household configured with? This is the single most
+        useful field on the form — capabilities and failure modes differ sharply between
+        providers, and a receipt that a frontier model reads cleanly may be unreadable to a
+        small local one.
+      options:
+        - Anthropic (byok — household's own key)
+        - Anthropic (instance_owner — key from the instance environment)
+        - Gemini
+        - Ollama (self-hosted, co-located with the backend)
+        - None configured
+        - Not applicable / do not know
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model name
+      description: The model id in use, if the bug involves a model call. No key, just the name.
+      placeholder: "claude-opus-5, llama3.2-vision:11b, ..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered, from a clean state, precise enough to be replayed by someone who has never
+        seen your setup. Include the exact commands you ran.
+      placeholder: |
+        1. Start PostgreSQL with `podman run ... postgres:16`
+        2. Set PANTRY_ENV=local in .env
+        3. Run `uv run pytest tests/test_inventory.py`
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should have happened, and what makes you say so — a doc, an ADR, a test?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead. Quote the exact error message rather than paraphrasing it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, tracebacks and command output
+      description: >-
+        Paste the relevant part, not the whole file. **Scrub it first** — tracebacks and debug
+        logs are where keys and connection strings hide. This block is rendered as plain text,
+        no backticks needed.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Host OS and version, `podman --version`, `uv --version`, Python version, PostgreSQL
+        version, and `getenforce` if you are on a SELinux host.
+      placeholder: |
+        OS:         Rocky Linux 10
+        podman:     5.4.0
+        uv:         0.9.7
+        Python:     3.14.0
+        PostgreSQL: 16.4 (container)
+        SELinux:    Enforcing
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: >-
+        Workarounds you found, when it started, whether it is intermittent, relevant
+        configuration with all values redacted, screenshots. For a receipt-parsing bug, describe
+        the receipt — do not attach one that shows a real loyalty-card number or address.
+    validations:
+      required: false

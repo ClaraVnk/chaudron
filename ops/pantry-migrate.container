@@ -1,0 +1,61 @@
+# One-shot Alembic migration runner (rootless).
+#
+# Install to:  ~/.config/containers/systemd/pantry-migrate.container
+# Run with:    systemctl --user start pantry-migrate.service
+# Inspect:     journalctl --user -u pantry-migrate.service
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS A SEPARATE UNIT, AND NOT THE API ENTRYPOINT
+# ---------------------------------------------------------------------------
+# The API runs with AutoUpdate=registry: a new image is pulled and started
+# automatically, within 15 minutes of a merge to `main`, with nobody watching.
+#
+# If migrations ran in the API entrypoint, that pipeline would apply schema
+# changes to production unattended. Podman's automatic rollback would then be
+# actively misleading: it restores the previous *image*, and cannot restore the
+# previous *schema*. You would end up with old code against a new database —
+# usually worse than the failure it was trying to undo.
+#
+# So: the image ships without applying anything, and migrations are a deliberate
+# act. `AutoUpdate=` is intentionally absent from this unit.
+#
+# Deployment order for a release that carries a migration:
+#   1. systemctl --user start pantry-migrate.service   (and read the log)
+#   2. let auto-update pick up the API image, or force it:
+#      podman auto-update
+#
+# Which means migrations must be backward compatible with the currently running
+# code, because for a few minutes both will coexist. Expand, migrate, contract —
+# add columns before removing any, never in one release.
+
+[Unit]
+Description=Pantry — database migrations (one-shot)
+Documentation=https://github.com/ClaraVnk/pantry
+After=pantry-db.service
+Requires=pantry-db.service
+
+[Container]
+ContainerName=pantry-migrate
+Image=ghcr.io/claravnk/pantry:latest
+Network=pantry-net
+
+Exec=alembic upgrade head
+
+EnvironmentFile=%h/pantry/pantry.env
+Secret=pantry-database-url,type=env,target=PANTRY_DATABASE_URL
+
+NoNewPrivileges=true
+DropCapability=ALL
+ReadOnly=true
+Tmpfs=/tmp:rw,size=32M,mode=1777
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# Fail loudly rather than retrying against a database in an unknown state.
+Restart=no
+TimeoutStartSec=300
+
+# Deliberately no [Install] section: this unit is never enabled, only started
+# on purpose. Enabling it would reintroduce exactly the unattended-migration
+# problem the separation exists to prevent.

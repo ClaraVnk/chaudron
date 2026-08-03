@@ -1,0 +1,251 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  UV_VERSION: "0.9.7"
+  # Deterministic installs: fail instead of silently re-resolving the lockfile.
+  UV_FROZEN: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Lint + format check (verification only, never auto-fix in CI)
+  # ---------------------------------------------------------------------------
+  backend-lint:
+    name: Backend / lint + format
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --locked --group dev
+
+      - name: Lint (ruff check)
+        run: uv run ruff check --output-format=github .
+
+      - name: Format check (ruff format --check)
+        run: uv run ruff format --check --diff .
+
+  # ---------------------------------------------------------------------------
+  # 2. Static typing
+  # ---------------------------------------------------------------------------
+  backend-typecheck:
+    name: Backend / mypy
+    runs-on: ubuntu-latest
+    needs: backend-lint
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --locked --group dev
+
+      - name: Type check
+        run: uv run mypy
+
+  # ---------------------------------------------------------------------------
+  # 3. Tests against a real PostgreSQL 16 — never SQLite
+  # ---------------------------------------------------------------------------
+  backend-test:
+    name: Backend / pytest (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: backend-typecheck
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pantry
+          POSTGRES_PASSWORD: pantry
+          POSTGRES_DB: pantry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pantry -d pantry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Test credentials only: this database exists for the length of the job.
+      PANTRY_ENV: ci
+      PANTRY_LOG_LEVEL: WARNING
+      PANTRY_DATABASE_URL: postgresql+asyncpg://pantry:pantry@localhost:5432/pantry_test
+      PANTRY_SECRET_KEY: ci-only-not-a-real-secret
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync dependencies
+        run: uv sync --locked --group dev
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 4. OCI image build — Podman only, never Docker
+  # ---------------------------------------------------------------------------
+  backend-build:
+    name: Backend / build image (podman)
+    runs-on: ubuntu-latest
+    needs: backend-test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Show podman version
+        run: podman version
+
+      - name: Build image
+        run: |
+          podman build \
+            --format docker \
+            --file backend/Containerfile \
+            --tag "localhost/pantry-api:${GITHUB_SHA::12}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            backend
+
+      - name: Inspect image
+        run: podman image inspect "localhost/pantry-api:${GITHUB_SHA::12}" --format '{{ .Id }} {{ .Config.User }}'
+
+  # ---------------------------------------------------------------------------
+  # 5. Security — dependency vulnerabilities and leaked secrets
+  # ---------------------------------------------------------------------------
+  security-deps:
+    name: Security / dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python ${{ env.PYTHON_VERSION }}
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Export locked runtime dependencies
+        run: uv export --locked --no-dev --no-emit-project --format requirements-txt --output-file requirements.ci.txt
+
+      - name: Audit dependencies
+        run: uvx --from pip-audit==2.9.0 pip-audit --requirement requirements.ci.txt --strict --progress-spinner off
+
+  security-secrets:
+    name: Security / secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so gitleaks can scan every commit, not just the tip.
+          fetch-depth: 0
+
+      - name: Scan for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # 6. Frontend — READY BUT INACTIVE.
+  # The React/Vite app does not exist yet. Every step is guarded on the presence
+  # of frontend/package.json, so this job reports success and does nothing until
+  # the frontend is scaffolded. Do not delete it: it activates on its own.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend / lint + build (inactive until scaffolded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Detect frontend
+        id: detect
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Frontend inactive::frontend/package.json not found; skipping lint and build."
+          fi
+
+      - name: Set up Node
+        if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        if: steps.detect.outputs.present == 'true'
+        working-directory: frontend
+        run: npm run build

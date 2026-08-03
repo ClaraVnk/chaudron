@@ -1,0 +1,147 @@
+name: Feature request
+description: Suggest a capability, a change of direction, or an improvement to the design.
+title: "feat: "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pantry is in the **scoping** phase, which makes this a good moment for this kind of
+        issue: the data model and the layer boundaries are not settled yet, so a well-argued
+        proposal can still change the shape of the project cheaply.
+
+        Two things worth checking first:
+
+        - **[`docs/adr/`](https://github.com/ClaraVnk/pantry/tree/main/docs/adr)** — some
+          things are missing on purpose. Retailer drive integration, an application-funded
+          inference mode, and a native mobile app were each considered and rejected with
+          reasons. Reopening one of them is fine, but bring a new argument, not a preference.
+        - **[CONTRIBUTING.md](https://github.com/ClaraVnk/pantry/blob/main/CONTRIBUTING.md)**
+          — large features are best agreed on before anyone writes code.
+
+        Please do not include API keys, passwords or any other credential in this issue.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for this idea.
+          required: true
+        - label: I checked whether an existing ADR already rejects it, and if so I address its reasoning below.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What are you actually trying to do, and what stops you? Describe the situation, not the
+        solution — a problem stated concretely usually admits a better answer than the one you
+        arrived with.
+      placeholder: >-
+        When I get home from shopping I have to enter twenty items by hand, because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: >-
+        What you would like Pantry to do. Include how a user encounters it, what it does when a
+        household has no model provider configured, and anything it would need to store.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >-
+        Other ways of solving the same problem, including doing nothing, and why you set them
+        aside. This section carries real weight here — it is the same discipline the ADRs use.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which part of the project does this touch?
+      multiple: true
+      options:
+        - Stock tracking and data model
+        - Barcode scanning / Open Food Facts
+        - Receipt import and OCR
+        - Recipe suggestions
+        - Shopping list
+        - Model providers (Anthropic / Gemini / Ollama)
+        - Multi-tenancy and households
+        - Inbound email
+        - Frontend / PWA
+        - Ops, containers, deployment
+        - CI and tooling
+        - Documentation and ADRs
+        - Not sure
+    validations:
+      required: false
+
+  - type: dropdown
+    id: adr
+    attributes:
+      label: Would this need an ADR?
+      description: >-
+        An architecture decision record is required when a change commits the project to an
+        external dependency that is hard to remove, constrains the data model, redraws a
+        boundary between layers, rules out a feature someone could reasonably expect, or
+        creates a recurring cost. It is *not* required for a replaceable utility library, a
+        naming convention, or a detail local to one module. See
+        [ADR 0001](https://github.com/ClaraVnk/pantry/blob/main/docs/adr/0001-record-architecture-decisions.md).
+        Guessing wrong here costs nothing — it gets sorted out in triage.
+      options:
+        - "Yes — this is a structural decision and needs an ADR"
+        - "Yes — and it would supersede an existing ADR"
+        - "No — it fits inside decisions already recorded"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: adr_detail
+    attributes:
+      label: Which ADR, and why
+      description: >-
+        If you answered yes above, sketch the decision in a sentence or two, and name the ADR
+        it would supersede if there is one. Accepted ADRs are immutable — they are replaced,
+        never edited.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Compatibility with the project's fixed constraints
+      description: >-
+        These are settled decisions. A proposal that breaks one is not automatically refused,
+        but it then has to argue against the ADR that established it.
+      options:
+        - label: This does not require SQLite, or any database other than PostgreSQL.
+          required: false
+        - label: This does not require Docker; Podman covers it.
+          required: false
+        - label: This does not require the application to pay for users' model inference.
+          required: false
+        - label: This works, or degrades visibly, for a household with no model provider configured.
+          required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: >-
+        Prior art in other projects, sketches, links, relevant API documentation. Say if you
+        would like to implement it yourself.
+    validations:
+      required: false
