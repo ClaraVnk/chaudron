@@ -1,0 +1,36 @@
+# gitleaks configuration.
+#
+# Extends the default rule set rather than replacing it: the point of the CI job
+# is to catch a real credential, and a hand-written rule list would quietly stop
+# catching whatever it forgot.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+Deliberately fake provider keys used by the test suite.
+
+These exist because several tests assert that a credential *cannot* leak: the
+doubles inject a key into provider error messages and the suite requires it not
+to reappear in the message, the repr, `__cause__` or the redacted output. A test
+that proves a key is never leaked needs a key to not leak.
+
+Every value below is self-describing prose rather than a plausible token, and
+none authenticates anywhere. They are allowlisted by path so that a real key
+committed to application code is still caught.
+"""
+paths = [
+  '''backend/tests/.*\.py''',
+  '''backend/src/chaudron/infra/llm/doubles\.py''',
+  # `gitleaks dir` walks the filesystem and does not honour .gitignore, so a
+  # developer's local `.env` trips it every time. That file is gitignored and can
+  # never reach a commit — the `gitleaks git` pass, which scans what actually
+  # landed in history, is the one that guards against a real leak and is left
+  # untouched by this entry.
+  '''(^|/)\.env(\.[^/]+)?$''',
+]
+regexes = [
+  '''sk-ant-api03-[a-z0-9-]*(household|key|the-|replacement)[a-z0-9-]*''',
+  '''sk-ant-contract-DOUBLE-\d+''',
+]

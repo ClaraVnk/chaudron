@@ -1,0 +1,45 @@
+.banner {
+  background: var(--warn-subtle);
+  border-bottom: 2px solid var(--accent);
+  color: var(--warn-text);
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.offline {
+  background: var(--danger-subtle);
+  border-bottom-color: var(--danger);
+  color: var(--danger);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: 700;
+}
+
+.mark {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.reasons {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reasons li::marker {
+  color: currentcolor;
+}
+
+.note {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}

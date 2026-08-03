@@ -112,3 +112,6 @@ data/openfoodfacts/
 uploads/
 media/
 receipts/
+
+# Local demo stack (see docs/screenshots): generated, never committed
+frontend/.env.local

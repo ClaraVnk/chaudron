@@ -465,6 +465,14 @@ class Product(Base):
     net_content_unit_code: Mapped[str | None] = mapped_column(
         String(16), ForeignKey("unit.code", ondelete="RESTRICT")
     )
+    # The unit this product is normally counted in, independent of the packaged
+    # net content: eggs come in a box of six but are stocked as pieces. Required
+    # by `POST /v1/products` (docs/api-contract-v1.md), and it cannot borrow
+    # net_content_unit_code, which `ck_product_net_content_pair` forbids setting
+    # without a value.
+    default_unit_code: Mapped[str | None] = mapped_column(
+        String(16), ForeignKey("unit.code", ondelete="RESTRICT")
+    )
     # The two scalars that allow crossing dimensions at all. Absent them, "2 onions"
     # and "300 g of onions" simply stay two lines -- which beats inventing a total.
     unit_weight_g: Mapped[Decimal | None] = mapped_column(QUANTITY)

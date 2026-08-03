@@ -42,13 +42,26 @@ PROVIDER_KEYS: Final[tuple[str, ...]] = ("anthropic", "openai", "gemini", "mistr
 
 _REGISTRY_MODULE: Final = "chaudron.infra.llm.contract"
 _REGISTRY_ATTR: Final = "CONTRACT_ADAPTERS"
-_PORTS_MODULE: Final = "chaudron.domain.ports"
-_ERRORS_MODULE: Final = "chaudron.domain.errors"
+# ADR-0005 names the ports and their errors but not the module they live in. Both
+# ended up in one place, `chaudron.domain.llm_ports`, because the capability model
+# and the degradation taxonomy are meaningless apart from the ports they qualify --
+# and `chaudron.domain.ports` is the repository-port module, a different concern.
+_PORTS_MODULE: Final = "chaudron.domain.llm_ports"
+_ERRORS_MODULE: Final = "chaudron.domain.llm_ports"
 
 #: Port name -> the single coroutine every implementation must provide.
 _PORTS: Final[Mapping[str, str]] = {
-    "RecipeSuggester": "suggest_recipes",
-    "ReceiptExtractor": "extract_lines",
+    "RecipeGenerator": "suggest",
+    "ReceiptParser": "parse",
+}
+
+#: Which port a capability is exercised through. Vision only matters to receipts;
+#: everything else shows up on the recipe path.
+_PORT_FOR_CAPABILITY: Final[Mapping[str, str]] = {
+    "vision": "ReceiptParser",
+    "structured_output": "RecipeGenerator",
+    "prompt_caching": "RecipeGenerator",
+    "long_context": "RecipeGenerator",
 }
 
 #: Failure scenario -> the domain exception it must surface as.
@@ -345,7 +358,7 @@ async def test_degradation_behaviour_matches_its_declared_case(
     if strategy not in _DEGRADATION_STRATEGIES:
         pytest.skip("covered by test_missing_capability_declares_a_taxonomy_case")
 
-    port_name = "ReceiptExtractor" if capability == "vision" else "RecipeSuggester"
+    port_name = _PORT_FOR_CAPABILITY[capability]
     try:
         implementation = adapter.build_port(port_name, f"missing_{capability}")
     except LookupError:

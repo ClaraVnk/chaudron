@@ -36,7 +36,14 @@ here in the meantime so the sources and the outputs stay in one place.
 | Contents | `#FFD166` → `#F59E0B` → `#D9480F` | The only saturated element. Everything else is neutral so this reads as heat |
 | Steam | `#F0B93B` | Same family as the contents, at 40–70 % opacity |
 | Ink (wordmark) | `#22242A` | |
-| Muted text | `#6B7280` | |
+| Muted text — logo only | `#6B7280` | Fine on the logo's own white/neutral ground |
+| Muted text — UI | `#5D6470` | **Use this one in the interface.** `#6B7280` measures 4.47:1 against the warm background, below the WCAG AA floor of 4.5:1. Same family, 5.5:1. |
+
+The two muted greys are not a mistake. The lighter one predates any interface
+and sits on neutral ground in the lockup, where it passes; the darker one exists
+because the same value failed against the warm surface once there was a real UI
+to measure it on. If the logo is ever placed on the warm background, it takes
+the darker value too.
 
 Wordmark: **URW Gothic** (fallbacks: Century Gothic, Questrial, Futura). Chosen
 because its circular letterforms echo the vessel; the serif candidates pulled

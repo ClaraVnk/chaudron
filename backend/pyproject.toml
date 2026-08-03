@@ -29,6 +29,11 @@ dependencies = [
     "httpx==0.28.1",
     "anthropic==0.120.2",
     "python-multipart==0.0.32",
+    # AES-256-GCM for the household provider keys at rest (docs/data-model.md
+    # section 9.2). The only cryptography this project performs itself, and the
+    # reason it uses a maintained binding rather than an implementation of its
+    # own: a hand-rolled AEAD is the classic way to lose the authentication tag.
+    "cryptography==50.0.0",
 ]
 
 [project.urls]

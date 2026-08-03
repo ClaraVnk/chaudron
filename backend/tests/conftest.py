@@ -24,29 +24,34 @@ run on a machine that simply has no container runtime.
 
 from __future__ import annotations
 
-import asyncio
+import base64
 import os
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import Final, Protocol
 
+import httpx
 import pytest
-from sqlalchemy import make_url, text
+from alembic import command
+from alembic.config import Config
+from fastapi import FastAPI
+from pydantic import SecretStr
+from sqlalchemy import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from chaudron.api.deps import get_session
+from chaudron.api.main import create_app
+from chaudron.config import Settings
 from chaudron.domain.models import (
-    Base,
     Household,
     HouseholdMember,
     MembershipRole,
     UserAccount,
 )
-
-if TYPE_CHECKING:
-    import httpx
+from chaudron.infra.crypto import CredentialCipher
 
 # --------------------------------------------------------------------------- #
 # Container runtime
@@ -155,32 +160,35 @@ def postgres_url() -> Iterator[str]:
         container.stop()
 
 
-async def _create_schema(url: str) -> None:
-    engine = create_async_engine(url, poolclass=NullPool)
-    try:
-        async with engine.begin() as connection:
-            # Required by ix_product_name_trgm. The test role owns its database, so
-            # this succeeds; in production the extension is created by a migration.
-            await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-            await connection.run_sync(Base.metadata.create_all)
-    finally:
-        await engine.dispose()
+_BACKEND_ROOT: Final = Path(__file__).resolve().parent.parent
+
+
+def _apply_migrations(url: str) -> None:
+    """Bring the database to ``head`` with Alembic.
+
+    Not ``metadata.create_all``: that would validate a schema no environment ever
+    applies, and a broken migration would reach production behind a green suite.
+    It also means the reference tables (``unit``, ``llm_provider``) are seeded
+    here exactly as they are in production, by revision ``0002``.
+
+    The URL is handed to Alembic explicitly rather than through the environment,
+    so the suite needs no application secrets to build a schema.
+    """
+    config = Config(str(_BACKEND_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(_BACKEND_ROOT / "migrations"))
+    config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(config, "head")
 
 
 @pytest.fixture(scope="session")
 def initialised_database(postgres_url: str) -> str:
-    """Create the schema once per session.
+    """Migrate the database once per session.
 
-    NOTE: this uses ``metadata.create_all`` because no Alembic revision exists yet.
-    The day ``migrations/versions`` has content, this must run the migrations
-    instead -- otherwise the suite validates a schema no environment ever applies,
-    and a broken migration reaches production green.
-
-    Deliberately a *synchronous* fixture driving its own loop: the session-scoped
-    async fixture alternative forces a session-scoped event loop, and asyncpg
-    connections created there break when the function-scoped tests run in another.
+    Deliberately a *synchronous* fixture: Alembic drives its own event loop, and a
+    session-scoped async fixture would force a session-scoped loop that asyncpg
+    connections created in function-scoped tests cannot be used across.
     """
-    asyncio.run(_create_schema(postgres_url))
+    _apply_migrations(postgres_url)
     return postgres_url
 
 
@@ -340,32 +348,76 @@ async def tenant_pair(
 
 
 # --------------------------------------------------------------------------- #
-# HTTP client -- not wireable yet
+# HTTP client
 # --------------------------------------------------------------------------- #
+
+#: Test-only values that satisfy the configuration's fail-fast rules. They are
+#: constants, not secrets: nothing signs or encrypts anything in the suite, and a
+#: value read from the developer's environment would make the tests depend on it.
+_TEST_SECRET_KEY: Final = "test-secret-key-that-is-long-enough-for-validation"
+_TEST_ENCRYPTION_KEY: Final = base64.b64encode(b"0" * 32).decode()
+
+
+def build_test_cipher() -> CredentialCipher:
+    """The very cipher :func:`build_test_settings` yields, for tests that seed a row.
+
+    Storing a household key means writing a ciphertext the *application* can read
+    back, so a test that inserts one must encrypt with the same master key the app
+    was configured with. Exposed here rather than re-derived per test file, so the two
+    cannot drift.
+    """
+    return CredentialCipher(base64.b64decode(_TEST_ENCRYPTION_KEY))
+
+
+def build_test_settings(database_url: str) -> Settings:
+    return Settings(
+        env="ci",
+        log_level="WARNING",
+        database_url=SecretStr(database_url),
+        secret_key=SecretStr(_TEST_SECRET_KEY),
+        credential_encryption_key=SecretStr(_TEST_ENCRYPTION_KEY),
+        cors_origins=["http://localhost:5173"],
+    )
 
 
 @pytest.fixture
-def api_client() -> httpx.AsyncClient:
-    """Placeholder for the ASGI test client.
+def api_app(initialised_database: str, db_session: AsyncSession) -> Iterator[FastAPI]:
+    """The real application, with only its database session replaced.
 
-    Skips instead of guessing. Wiring it needs three things that do not exist yet,
-    and inventing any of them would produce a fixture that silently tests something
-    other than the application:
+    Exactly one dependency is overridden. The household resolution is **not**:
+    ADR-0006 requires the tenant to be derived server-side, so a fixture that
+    injected ``household_id`` directly would bypass the one piece of code the
+    isolation tests exist to exercise. Tests send ``X-Household-Id`` like a real
+    client and get the real 401 when they do not.
 
-    1. An application factory (``chaudron.api.app:create_app`` or equivalent) -- the
-       ``api`` package is still empty.
-    2. A dependency override binding the request-scoped session to :func:`db_session`,
-       so requests join the test transaction and are rolled back with it.
-    3. An authentication override producing the ``HouseholdScope``. It must go
-       through the real resolution path: ADR-0006 requires the tenant to derive from
-       the auth context, so a fixture that injects ``household_id`` directly would
-       bypass the very code the isolation tests exist to exercise.
+    Overriding the session also gives every request the test's transaction, so
+    what a handler writes is rolled back with the test.
     """
-    pytest.skip(
-        "no HTTP client fixture yet: chaudron.api exposes no application factory, "
-        "no session dependency to override, and no auth context to build a "
-        "HouseholdScope from. See the docstring of tests.conftest.api_client."
-    )
+    app = create_app(build_test_settings(initialised_database))
+
+    async def _use_test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _use_test_session
+    yield app
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def api_client(api_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    """An HTTP client speaking to the application in-process, over ASGI."""
+    transport = httpx.ASGITransport(app=api_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
+    # The factory builds these eagerly; the lifespan that would normally release
+    # them does not run under an ASGI transport.
+    await api_app.state.catalog.aclose()
+    await api_app.state.database.dispose()
+
+
+def household_headers(household: Household) -> dict[str, str]:
+    """The header the provisional tenant resolution reads (api-contract-v1)."""
+    return {"X-Household-Id": str(household.id)}
 
 
 # --------------------------------------------------------------------------- #
@@ -383,6 +435,8 @@ _DATABASE_FIXTURES: Final = frozenset(
         "make_user",
         "make_member",
         "tenant_pair",
+        "api_app",
+        "api_client",
     }
 )
 

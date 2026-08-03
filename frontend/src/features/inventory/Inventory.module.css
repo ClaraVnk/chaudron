@@ -1,0 +1,159 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) 0;
+}
+
+.searchRow {
+  position: relative;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.search {
+  flex: 1;
+  min-height: var(--tap-target);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.summary {
+  padding: 0 var(--space-4);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: 0 var(--space-4) var(--space-6);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  padding-block: var(--space-2);
+  z-index: 1;
+}
+
+.groupName {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.groupKind {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-shadow: var(--shadow-sm);
+}
+
+.itemExpiring {
+  border-left: 4px solid var(--accent);
+}
+
+.itemExpired {
+  border-left: 4px solid var(--danger);
+}
+
+.itemMain {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.itemName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.itemBrand {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.itemQuantity {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.itemActions {
+  display: flex;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.itemActions button {
+  flex: 1;
+  min-height: var(--tap-target);
+  font-size: 0.85rem;
+}
+
+.footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) 0 var(--space-5);
+}

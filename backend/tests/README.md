@@ -24,8 +24,8 @@ uv run pytest tests/tenancy          # tenant-isolation guards
 uv run pytest -q -k llm_provider     # by name
 ```
 
-A run that ends with skips is normal today: the application does not exist yet, and
-every test that cannot run says why. `-ra` (already in `addopts`) prints the
+A run that ends with skips is normal: the LLM adapters are not all registered yet,
+and every test that cannot run says why. `-ra` (already in `addopts`) prints the
 reasons — read them, they are the backlog.
 
 ## Markers
@@ -94,10 +94,15 @@ host directory. Any future fixture that does must pass `:Z`.
 
 ### Schema
 
-`conftest.py` creates the schema with `metadata.create_all` plus
-`CREATE EXTENSION pg_trgm`. **This is temporary.** As soon as `migrations/versions`
-has content, that fixture must run Alembic instead — otherwise the suite validates a
-schema no environment ever applies, and a broken migration reaches production green.
+`conftest.py` brings the database to `head` with **Alembic**, exactly as a deployment
+does — not `metadata.create_all`, which would validate a schema no environment ever
+applies and let a broken migration reach production behind a green suite. The
+reference tables (`unit`, `llm_provider`) are therefore seeded by revision `0002`
+and are available to every test.
+
+The URL is passed to Alembic programmatically, so the suite needs no application
+secrets. A database that already carries a hand-built schema (from an older
+`create_all` run) will fail here: drop it and let the suite migrate it.
 
 ## Fixtures
 
@@ -109,7 +114,15 @@ schema no environment ever applies, and a broken migration reaches production gr
 | `db_session` | function | `AsyncSession` rolled back after the test, `commit()` included |
 | `make_household` / `make_user` / `make_member` | function | Factories, all arguments optional |
 | `tenant_pair` | function | Two unrelated households with their owners — the seed of isolation tests |
-| `api_client` | function | Skips: no application factory exists yet (see its docstring) |
+| `api_app` | function | The real `create_app()` application, with only the session dependency overridden |
+| `api_client` | function | `httpx.AsyncClient` speaking to `api_app` in-process over ASGI |
+
+`api_app` overrides **one** dependency: the request-scoped session, so handler writes
+join the test transaction. The household resolution is deliberately *not* overridden —
+tests send `X-Household-Id` like a real client (`tests.conftest.household_headers`) and
+get the real `401` when they do not. Overriding it would bypass the only code the
+isolation tests exist to exercise. `tests/api/conftest.py` adds `make_location`,
+`make_product` and `RecordingCatalog`, a scripted stand-in for Open Food Facts.
 
 `db_session` opens a transaction on the connection and joins the session to it with
 `join_transaction_mode="create_savepoint"`. Code under test may commit; the outer

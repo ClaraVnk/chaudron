@@ -1,0 +1,197 @@
+/*
+ * Chaudron design tokens.
+ *
+ * Palette from assets/README.md: cast iron #22242A, muted text #6B7280, warm
+ * accent #F59E0B. The accent is the only saturated colour in the interface, so
+ * it keeps meaning heat and urgency.
+ *
+ * Contrast note: #F59E0B on white is ~2.1:1 and unusable for text. Amber is
+ * therefore a *surface* colour in light mode (dark ink on top) and a *text*
+ * colour only in dark mode, where it clears 8:1. Text-weight amber in light
+ * mode uses #92400E instead.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --iron-900: #22242a;
+  --iron-800: #2c2f36;
+  --iron-700: #42464f;
+  --iron-600: #4a4e57;
+
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --amber-800: #92400e;
+  --ember: #d9480f;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* Minimum comfortable one-handed target. Never shrink this. */
+  --tap-target: 44px;
+
+  --font-sans:
+    'URW Gothic', 'Century Gothic', Questrial, ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, sans-serif;
+  --font-body:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+
+  --shadow-sm: 0 1px 2px rgb(34 36 42 / 8%);
+  --shadow-md: 0 4px 16px rgb(34 36 42 / 10%);
+
+  --bg: #f7f6f3;
+  --bg-subtle: #efede8;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --border: #e2e0da;
+  --border-strong: #c9c6be;
+  --text: #22242a;
+  /*
+   * The brand sheet gives muted text as #6B7280, which is measured against pure
+   * white (4.83:1). On this warm background it falls to 4.47:1 — under AA, and
+   * axe flags it. Same slate family, two steps darker: 5.5:1 on the page
+   * background, 5.1:1 on the subtle fill.
+   */
+  --text-muted: #5d6470;
+  --text-inverse: #ffffff;
+
+  --accent: #f59e0b;
+  --accent-text: #92400e;
+  --accent-on: #22242a;
+  --accent-subtle: #fdf3e0;
+
+  --danger: #b42318;
+  --danger-subtle: #fdeceb;
+  --warn-text: #92400e;
+  --warn-subtle: #fdf3e0;
+  --ok-text: #17663f;
+  --ok-subtle: #e8f5ee;
+
+  --focus-ring: #1d4ed8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --bg-subtle: #1d1f24;
+    --surface: #22242a;
+    --surface-raised: #2c2f36;
+    --border: #383c45;
+    --border-strong: #4a4e57;
+    --text: #f2f2f0;
+    --text-muted: #a2a7b0;
+    --text-inverse: #22242a;
+
+    --accent: #f59e0b;
+    --accent-text: #fbbf24;
+    --accent-on: #22242a;
+    --accent-subtle: #33291a;
+
+    --danger: #f87171;
+    --danger-subtle: #3a2020;
+    --warn-text: #fbbf24;
+    --warn-subtle: #33291a;
+    --ok-text: #6ee7b7;
+    --ok-subtle: #16302a;
+
+    --focus-ring: #93c5fd;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 4px 16px rgb(0 0 0 / 45%);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+ul,
+ol {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* One focus treatment everywhere, always visible, never removed. */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
