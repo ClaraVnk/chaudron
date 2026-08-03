@@ -1,5 +1,5 @@
 # Scoping skeleton: tables, constraints and indexes only -- not wired to anything yet.
-"""Pantry data model skeleton.
+"""Chaudron data model skeleton.
 
 Companion document: ``docs/data-model.md`` (French, internal design note). Every
 non-obvious decision taken here is argued there; comments below only record the
@@ -153,6 +153,8 @@ class StorageKind(enum.StrEnum):
 
     FRIDGE = "fridge"
     FREEZER = "freezer"
+    # "pantry" here is the cupboard, not the project. Do not rename it along
+    # with the application.
     PANTRY = "pantry"
     CELLAR = "cellar"
     OTHER = "other"

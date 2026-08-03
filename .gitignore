@@ -76,12 +76,12 @@ tmp/
 # ---------------------------------------------------------------------------
 # Secrets, key material and data dumps  (SEC-002, SEC-011)
 # ---------------------------------------------------------------------------
-# Quadlet environment files hold PANTRY_CREDENTIAL_ENCRYPTION_KEY and provider
+# Quadlet environment files hold CHAUDRON_CREDENTIAL_ENCRYPTION_KEY and provider
 # API keys in clear text. They belong in $HOME on the host, never in the repo.
 *.env
 !.env.example
-pantry.env
-pantry-db.env
+chaudron.env
+chaudron-db.env
 
 # Key material, in any of the shapes it usually takes
 *.pem
@@ -93,7 +93,7 @@ pantry-db.env
 secrets/
 .secrets/
 
-# Database dumps: a Pantry dump is a full inventory of someone's home, plus the
+# Database dumps: a Chaudron dump is a full inventory of someone's home, plus the
 # encrypted provider credentials. Keep them out of the working tree entirely.
 *.sql
 *.dump

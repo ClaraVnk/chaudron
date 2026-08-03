@@ -1,8 +1,8 @@
 # One-shot Alembic migration runner (rootless).
 #
-# Install to:  ~/.config/containers/systemd/pantry-migrate.container
-# Run with:    systemctl --user start pantry-migrate.service
-# Inspect:     journalctl --user -u pantry-migrate.service
+# Install to:  ~/.config/containers/systemd/chaudron-migrate.container
+# Run with:    systemctl --user start chaudron-migrate.service
+# Inspect:     journalctl --user -u chaudron-migrate.service
 #
 # ---------------------------------------------------------------------------
 # WHY THIS IS A SEPARATE UNIT, AND NOT THE API ENTRYPOINT
@@ -20,7 +20,7 @@
 # act. `AutoUpdate=` is intentionally absent from this unit.
 #
 # Deployment order for a release that carries a migration:
-#   1. systemctl --user start pantry-migrate.service   (and read the log)
+#   1. systemctl --user start chaudron-migrate.service   (and read the log)
 #   2. let auto-update pick up the API image, or force it:
 #      podman auto-update
 #
@@ -29,20 +29,20 @@
 # add columns before removing any, never in one release.
 
 [Unit]
-Description=Pantry — database migrations (one-shot)
-Documentation=https://github.com/ClaraVnk/pantry
-After=pantry-db.service
-Requires=pantry-db.service
+Description=Chaudron — database migrations (one-shot)
+Documentation=https://github.com/ClaraVnk/chaudron
+After=chaudron-db.service
+Requires=chaudron-db.service
 
 [Container]
-ContainerName=pantry-migrate
-Image=ghcr.io/claravnk/pantry:latest
-Network=pantry-net
+ContainerName=chaudron-migrate
+Image=ghcr.io/claravnk/chaudron:latest
+Network=chaudron-net
 
 Exec=alembic upgrade head
 
-EnvironmentFile=%h/pantry/pantry.env
-Secret=pantry-database-url,type=env,target=PANTRY_DATABASE_URL
+EnvironmentFile=%h/chaudron/chaudron.env
+Secret=chaudron-database-url,type=env,target=CHAUDRON_DATABASE_URL
 
 NoNewPrivileges=true
 DropCapability=ALL

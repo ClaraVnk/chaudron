@@ -1,19 +1,19 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question, idea, or disagreement with an ADR
-    url: https://github.com/ClaraVnk/pantry/discussions
+    url: https://github.com/ClaraVnk/chaudron/discussions
     about: >-
-      Questions about setting Pantry up, how something is meant to work, or why an
-      architecture decision went the way it did. Pantry is still in the scoping phase, so
+      Questions about setting Chaudron up, how something is meant to work, or why an
+      architecture decision went the way it did. Chaudron is still in the scoping phase, so
       arguing with an ADR is a welcome use of Discussions — bring the counter-argument and
       it may become an issue.
   - name: Security vulnerability — do not open a public issue
-    url: https://github.com/ClaraVnk/pantry/security/advisories/new
+    url: https://github.com/ClaraVnk/chaudron/security/advisories/new
     about: >-
       Report privately through a GitHub security advisory, or by email to kevin@stackops.ch.
       Never include a real API key, password or token in a report. See SECURITY.md.
   - name: Code of Conduct
-    url: https://github.com/ClaraVnk/pantry/blob/main/CODE_OF_CONDUCT.md
+    url: https://github.com/ClaraVnk/chaudron/blob/main/CODE_OF_CONDUCT.md
     about: >-
       Conduct concerns are reported privately to kevin@stackops.ch, not through the issue
       tracker.

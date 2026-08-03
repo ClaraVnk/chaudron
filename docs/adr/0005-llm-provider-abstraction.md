@@ -6,7 +6,7 @@ Accepté — 2026-08-03
 
 ## Contexte
 
-Deux fonctionnalités de Pantry reposent sur un modèle de langage : la génération de suggestions de recettes à partir du stock disponible, et l'extraction structurée des lignes d'un ticket de caisse photographié (modèle multimodal).
+Deux fonctionnalités de Chaudron reposent sur un modèle de langage : la génération de suggestions de recettes à partir du stock disponible, et l'extraction structurée des lignes d'un ticket de caisse photographié (modèle multimodal).
 
 La solution la plus directe serait d'appeler le SDK d'un fournisseur depuis les handlers HTTP. Trois éléments l'excluent :
 
@@ -44,12 +44,12 @@ Elles n'exposent ni « prompt », ni « message », ni « token » : uniquement 
 2. **Dégradation fonctionnelle visible** — la fonctionnalité reste offerte dans une forme réduite, signalée comme telle dans l'interface (le « mode dégradé »). Exemple : contexte trop court pour l'inventaire complet → suggestions calculées sur un sous-ensemble d'articles, avec mention explicite du périmètre retenu.
 3. **Indisponibilité explicite** — la fonctionnalité est désactivée, avec la raison affichée et la marche à suivre pour y remédier. Exemple : pas de vision → l'import de ticket est désactivé, jamais une erreur brute ni un JSON inventé à partir d'un modèle qui n'a pas vu l'image.
 
-**Indicateur de mode dégradé.** Dès que la configuration d'un foyer n'a pas la capacité pleine, l'interface affiche un indicateur **persistant**, détaillant ce qui est réduit ou indisponible et pourquoi. L'utilisateur ne doit jamais découvrir la limite au moment de l'échec : il doit la connaître avant d'essayer. C'est aussi ce qui protège la réputation du produit — une extraction médiocre attribuée au petit modèle local que l'utilisateur a lui-même chargé n'est pas la même chose qu'une extraction médiocre attribuée à Pantry.
+**Indicateur de mode dégradé.** Dès que la configuration d'un foyer n'a pas la capacité pleine, l'interface affiche un indicateur **persistant**, détaillant ce qui est réduit ou indisponible et pourquoi. L'utilisateur ne doit jamais découvrir la limite au moment de l'échec : il doit la connaître avant d'essayer. C'est aussi ce qui protège la réputation du produit — une extraction médiocre attribuée au petit modèle local que l'utilisateur a lui-même chargé n'est pas la même chose qu'une extraction médiocre attribuée à Chaudron.
 
 **Modèle de capacités : deux natures de déclaration, explicites dans le type.** L'asymétrie entre adaptateurs est structurante et fait partie du modèle, pas un cas particulier traité au coup par coup :
 
 - **Capacités statiques** (`AnthropicProvider`, `OpenAIProvider`, `GeminiProvider`, `MistralProvider`) — connues à l'avance, dérivées du couple (fournisseur, modèle) par une table embarquée dans l'adaptateur. Aucun appel réseau n'est nécessaire pour les connaître.
-- **Capacités sondées** (`OllamaProvider`) — dépendent du modèle chargé dans l'instance de l'utilisateur, qui peut changer sans que Pantry en soit averti. Elles sont établies à la configuration en interrogeant l'instance, persistées avec la configuration du foyer, horodatées, et rafraîchies sur demande explicite.
+- **Capacités sondées** (`OllamaProvider`) — dépendent du modèle chargé dans l'instance de l'utilisateur, qui peut changer sans que Chaudron en soit averti. Elles sont établies à la configuration en interrogeant l'instance, persistées avec la configuration du foyer, horodatées, et rafraîchies sur demande explicite.
 
 Le domaine consomme les deux à travers le même type `ProviderCapabilities`, mais la provenance (`static` / `probed`, avec la date du sondage) est portée par la valeur : l'interface peut ainsi signaler qu'une capacité sondée date et proposer un rafraîchissement, ce qui n'a aucun sens pour une capacité statique.
 
@@ -71,14 +71,14 @@ Un abonnement grand public ne donne **aucun** accès programmatique : ce sont de
 
 **Les abonnements grand public ne sont pas une option d'exécution.** Claude Pro/Max, ChatGPT Plus et Gemini Advanced sont des licences d'usage **personnel**, sans API stable ni contractuelle. Une application qui sert des utilisateurs ne peut s'y adosser : usage hors licence, surface non documentée susceptible de casser sans préavis, aucun engagement de disponibilité. Seuls des accès API facturés à l'usage ou un modèle auto-hébergé sont des fournisseurs légitimes à l'exécution.
 
-En revanche, ces abonnements sont parfaitement légitimes pour **développer** Pantry — écrire du code, concevoir des prompts, explorer des formats de sortie. La distinction porte sur le poste de dépense, pas sur l'outil : un abonnement peut construire le produit, il ne peut pas le servir.
+En revanche, ces abonnements sont parfaitement légitimes pour **développer** Chaudron — écrire du code, concevoir des prompts, explorer des formats de sortie. La distinction porte sur le poste de dépense, pas sur l'outil : un abonnement peut construire le produit, il ne peut pas le servir.
 
 ## Conséquences
 
 ### Positives
 
 - Le produit exploite pleinement les fournisseurs capables au lieu de s'aligner sur le plus faible : sortie structurée stricte et mise en cache de prompt sont utilisées là où elles existent.
-- Le foyer choisit selon ses propres critères — coût, capacités, juridiction — sans que Pantry impose un fournisseur.
+- Le foyer choisit selon ses propres critères — coût, capacités, juridiction — sans que Chaudron impose un fournisseur.
 - La logique métier est testable sans réseau : un `FakeRecipeSuggester` en mémoire suffit, et la majorité des tests n'a jamais besoin d'un vrai fournisseur.
 - La taxonomie de dégradation rend le comportement en capacité manquante prévisible et revuable : pour chaque couple, on sait quel cas s'applique et pourquoi.
 - Les tests de conformité bornent le coût d'ajout d'un fournisseur et transforment une régression potentielle en échec de CI.
@@ -89,7 +89,7 @@ En revanche, ces abonnements sont parfaitement légitimes pour **développer** P
 - **La matrice de test et de maintenance est importante, et c'est le vrai prix de la décision.** Cinq adaptateurs × chaque fonctionnalité de modèle × chaque capacité consommée : chaque nouvelle fonctionnalité multiplie les cas à trancher, implémenter, exposer et tester. Pour un développeur solo, c'est une charge structurelle, pas un coût ponctuel. Les tests de conformité la rendent tenable — ils ne la suppriment pas.
 - **Cinq SDK à suivre.** Chacun a son rythme de publication, ses ruptures d'API et ses modèles dépréciés. Une mise à jour de dépendance peut casser un adaptateur sans toucher aux autres, et il faut le détecter avant l'utilisateur.
 - **Les capacités statiques sont une table à maintenir à la main.** Chaque nouveau modèle publié par l'un des quatre fournisseurs demande une entrée ; une table périmée fait déclarer une capacité absente ou promet une capacité inexistante.
-- **La déclaration sondée d'Ollama est une source de bugs propre.** Elle dépend d'une instance tierce joignable au moment de la configuration ; l'utilisateur peut changer de modèle après coup sans que Pantry le sache, laissant des capacités périmées. Il faut gérer l'instance injoignable, la donnée obsolète et une voie de rafraîchissement — trois chemins d'erreur qui n'existent pour aucun autre adaptateur.
+- **La déclaration sondée d'Ollama est une source de bugs propre.** Elle dépend d'une instance tierce joignable au moment de la configuration ; l'utilisateur peut changer de modèle après coup sans que Chaudron le sache, laissant des capacités périmées. Il faut gérer l'instance injoignable, la donnée obsolète et une voie de rafraîchissement — trois chemins d'erreur qui n'existent pour aucun autre adaptateur.
 - **Le chemin d'émulation a ses propres modes d'échec** : latences variables et échecs résiduels que l'interface doit présenter honnêtement plutôt que masquer.
 - **L'indicateur de mode dégradé est du travail d'UI récurrent** : chaque capacité manquante doit être expliquée en langue naturelle, avec une remédiation actionnable. Un indicateur vague est pire qu'aucun.
 - **Support utilisateur plus difficile.** « Ça ne marche pas » peut venir de leur instance Ollama, de leur quota, d'une clé d'abonnement collée à la place d'une clé d'API, du modèle qu'ils ont choisi, ou du code. Le diagnostic exige de faire remonter le fournisseur, les capacités détectées et le mode d'échec dans les erreurs présentées.

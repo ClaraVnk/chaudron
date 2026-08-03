@@ -15,7 +15,7 @@ these comments, not the headings.
 Why this change exists. Link the issue, discussion or ADR it comes from
 (`Closes #123`, `Refs ADR-0006`). If it comes from none of those, say what prompted it.
 
-Pantry is in the scoping phase: if this adds feature code, state where the design for it was
+Chaudron is in the scoping phase: if this adds feature code, state where the design for it was
 agreed.
 -->
 

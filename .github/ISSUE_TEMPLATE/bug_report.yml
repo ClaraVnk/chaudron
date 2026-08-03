@@ -13,16 +13,16 @@ body:
         **Two things before you start.**
 
         **1. Never paste a secret here.** Issues are public and permanent. That means no
-        provider API key (`sk-ant-...`, Gemini keys), no `PANTRY_SECRET_KEY`, no database
+        provider API key (`sk-ant-...`, Gemini keys), no `CHAUDRON_SECRET_KEY`, no database
         password or DSN with credentials in it, no JWT from a live session, no inbound-email
         webhook key. Redact to a prefix and a length — `sk-ant-..., 108 chars` — and scrub
         your logs before pasting them. If a real secret does end up here, say so immediately:
         it has to be rotated, and editing the comment does not rotate it.
 
         **2. If this is a security vulnerability, close this form.** Report it privately
-        instead: [SECURITY.md](https://github.com/ClaraVnk/pantry/blob/main/SECURITY.md).
+        instead: [SECURITY.md](https://github.com/ClaraVnk/chaudron/blob/main/SECURITY.md).
 
-        Pantry is in the **scoping** phase — there is no release and no feature code yet, so
+        Chaudron is in the **scoping** phase — there is no release and no feature code yet, so
         reports about documentation, ADRs, the CI pipeline, the container image or the ops
         units are entirely legitimate here.
 
@@ -101,7 +101,7 @@ body:
         seen your setup. Include the exact commands you ran.
       placeholder: |
         1. Start PostgreSQL with `podman run ... postgres:16`
-        2. Set PANTRY_ENV=local in .env
+        2. Set CHAUDRON_ENV=local in .env
         3. Run `uv run pytest tests/test_inventory.py`
         4. ...
     validations:

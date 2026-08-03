@@ -48,8 +48,8 @@ PostgreSQL 16, always. There is no SQLite mode, not even for unit tests
 
 The database is resolved in this order:
 
-1. `PANTRY_TEST_DATABASE_URL` — explicit override, wins over everything.
-2. `PANTRY_DATABASE_URL` — what CI sets for its `postgres:16` service container.
+1. `CHAUDRON_TEST_DATABASE_URL` — explicit override, wins over everything.
+2. `CHAUDRON_DATABASE_URL` — what CI sets for its `postgres:16` service container.
 3. An ephemeral container started by testcontainers through Podman.
 
 If none is reachable, the database fixtures **skip** with the reason. They never
@@ -121,7 +121,7 @@ rollback still wipes everything. No truncation between tests, no ordering coupli
 providers of ADR-0005 and currently skips: nothing is registered. It activates on
 its own, one provider at a time — **you never edit the test file to add a provider**.
 
-Create `pantry/infra/llm/contract.py` exposing `CONTRACT_ADAPTERS`, a mapping from
+Create `chaudron/infra/llm/contract.py` exposing `CONTRACT_ADAPTERS`, a mapping from
 provider key (`anthropic`, `openai`, `gemini`, `mistral`, `ollama`) to an object
 matching this shape (structural, so infrastructure never imports the test package):
 

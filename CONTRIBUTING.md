@@ -1,6 +1,6 @@
-# Contributing to Pantry
+# Contributing to Chaudron
 
-Thanks for looking. Pantry is a small, opinionated, self-hostable project, and it
+Thanks for looking. Chaudron is a small, opinionated, self-hostable project, and it
 is at the stage where an outside opinion is worth more than an outside patch.
 
 Everything below is meant to make a contribution predictable — for you, because
@@ -11,7 +11,7 @@ review time is the scarcest resource here.
 
 ## 1. Where the project is right now
 
-**Pantry is in the scoping phase.** This repository contains architecture
+**Chaudron is in the scoping phase.** This repository contains architecture
 documents, architecture decision records, a project skeleton, container units
 and a CI pipeline. It contains **no feature code**: there is no working
 application, no release, and nothing to install and use. Do not expect to run it
@@ -72,8 +72,8 @@ documentation assumes. On a SELinux host, keep it enforcing and read
 ### 2.2 Clone and configure
 
 ```sh
-git clone https://github.com/ClaraVnk/pantry.git
-cd pantry
+git clone https://github.com/ClaraVnk/chaudron.git
+cd chaudron
 cp .env.example .env
 ```
 
@@ -86,33 +86,33 @@ carries a value that matters.
 Generate the secrets locally, do not invent them by hand:
 
 ```sh
-openssl rand -hex 32   # PANTRY_SECRET_KEY
+openssl rand -hex 32   # CHAUDRON_SECRET_KEY
 ```
 
 ### 2.3 Start PostgreSQL 16
 
-Pantry uses PostgreSQL and only PostgreSQL, including for tests (§4.5). The
+Chaudron uses PostgreSQL and only PostgreSQL, including for tests (§4.5). The
 password goes in through a Podman secret, never as a command-line argument —
 arguments are visible in `ps` and land in your shell history:
 
 ```sh
-podman network create pantry-net
-mkdir -p ~/pantry/data/postgres
+podman network create chaudron-net
+mkdir -p ~/chaudron/data/postgres
 ```
 
 ```sh
-read -rs -p 'Postgres password: ' PW && printf '%s' "$PW" | podman secret create pantry-db-password - && unset PW
+read -rs -p 'Postgres password: ' PW && printf '%s' "$PW" | podman secret create chaudron-db-password - && unset PW
 ```
 
 ```sh
-podman run -d --name pantry-db \
-  --network pantry-net \
+podman run -d --name chaudron-db \
+  --network chaudron-net \
   -p 127.0.0.1:5432:5432 \
-  --secret pantry-db-password,type=env,target=POSTGRES_PASSWORD \
-  -e POSTGRES_DB=pantry \
-  -e POSTGRES_USER=pantry \
+  --secret chaudron-db-password,type=env,target=POSTGRES_PASSWORD \
+  -e POSTGRES_DB=chaudron \
+  -e POSTGRES_USER=chaudron \
   -e PGDATA=/var/lib/postgresql/data/pgdata \
-  -v ~/pantry/data/postgres:/var/lib/postgresql/data:Z \
+  -v ~/chaudron/data/postgres:/var/lib/postgresql/data:Z \
   docker.io/library/postgres:16
 ```
 
@@ -124,10 +124,10 @@ Two details that are not optional:
   Podman needs the registry to be fully qualified. This is the one place the
   string appears legitimately.
 
-Set `PANTRY_DATABASE_URL` in `.env` accordingly:
+Set `CHAUDRON_DATABASE_URL` in `.env` accordingly:
 
 ```
-PANTRY_DATABASE_URL=postgresql+asyncpg://pantry:<password>@127.0.0.1:5432/pantry
+CHAUDRON_DATABASE_URL=postgresql+asyncpg://chaudron:<password>@127.0.0.1:5432/chaudron
 ```
 
 `ops/README.md` §1 covers the same ground in more depth, plus teardown.
@@ -145,7 +145,7 @@ commit it.
 
 ### 2.5 What does not work yet, and why that is expected
 
-`backend/src/pantry/domain/models.py` holds the full schema — 17 tables, and it
+`backend/src/chaudron/domain/models.py` holds the full schema — 17 tables, and it
 does create against a real PostgreSQL 16. Everything above it is still empty.
 So:
 
@@ -157,7 +157,7 @@ So:
   conformance suite waiting for its first adapter, the rest are documented
   tenancy exemptions. A skip without a reason is a bug — do not add one.
 - **The conformance suite arms itself.** Register an adapter in
-  `pantry.infra.llm.contract.CONTRACT_ADAPTERS` and 140 skipped tests start
+  `chaudron.infra.llm.contract.CONTRACT_ADAPTERS` and 140 skipped tests start
   running against it. See `backend/tests/README.md`.
 - The frontend job in CI detects the absence of `frontend/package.json` and skips
   itself.
@@ -197,7 +197,7 @@ Notes:
 Building the image (step 5 of §4.4):
 
 ```sh
-podman build --format docker -t localhost/pantry-api:dev -f backend/Containerfile backend
+podman build --format docker -t localhost/chaudron-api:dev -f backend/Containerfile backend
 ```
 
 `--format docker` names an **image format**, not an engine: Podman's default OCI
@@ -267,7 +267,7 @@ more than an implied green.
 
 ### 4.5 PostgreSQL only, never SQLite
 
-Pantry targets PostgreSQL 16 with `asyncpg`, in development, in CI, in tests and
+Chaudron targets PostgreSQL 16 with `asyncpg`, in development, in CI, in tests and
 in production ([ADR 0003](docs/adr/0003-backend-stack.md)). SQLite is not a
 supported fallback and not a test convenience.
 
@@ -402,7 +402,7 @@ Not to be unwelcoming — to save you the work. A pull request is refused if it:
 
 ## 7. Licence and what it means for you
 
-Pantry is licensed under **AGPL-3.0-or-later** (see [`LICENSE`](LICENSE)).
+Chaudron is licensed under **AGPL-3.0-or-later** (see [`LICENSE`](LICENSE)).
 
 **By contributing, you agree that your contribution is licensed under
 AGPL-3.0-or-later.** There is no contributor licence agreement and no copyright
@@ -413,9 +413,9 @@ which is a feature.
 
 Practically, this means:
 
-- **Anyone who distributes a modified Pantry must publish their source**, under
+- **Anyone who distributes a modified Chaudron must publish their source**, under
   the same licence.
-- **Section 13 is the point of the AGPL**: if someone runs a modified Pantry as a
+- **Section 13 is the point of the AGPL**: if someone runs a modified Chaudron as a
   network service that other people use, they must offer those users the modified
   source. Self-hosting your own instance for your own household triggers nothing —
   you are not providing a service to anyone else.
@@ -434,11 +434,11 @@ code, not in review.
 
 ## 8. Reporting
 
-- **Bug** → [bug report form](https://github.com/ClaraVnk/pantry/issues/new?template=bug_report.yml).
+- **Bug** → [bug report form](https://github.com/ClaraVnk/chaudron/issues/new?template=bug_report.yml).
   Never paste an API key into it.
-- **Idea or feature** → [feature request form](https://github.com/ClaraVnk/pantry/issues/new?template=feature_request.yml).
+- **Idea or feature** → [feature request form](https://github.com/ClaraVnk/chaudron/issues/new?template=feature_request.yml).
 - **Question, or disagreement with an ADR** →
-  [Discussions](https://github.com/ClaraVnk/pantry/discussions).
+  [Discussions](https://github.com/ClaraVnk/chaudron/discussions).
 - **Security vulnerability** → **not an issue.** See [`SECURITY.md`](SECURITY.md):
   private advisory, or kevin@stackops.ch.
 

@@ -1,29 +1,29 @@
-# Quadlet unit for the Pantry PostgreSQL 16 database (rootless).
+# Quadlet unit for the Chaudron PostgreSQL 16 database (rootless).
 #
-# Install to:   ~/.config/containers/systemd/pantry-db.container
+# Install to:   ~/.config/containers/systemd/chaudron-db.container
 # Reload with:  systemctl --user daemon-reload
-# Start with:   systemctl --user start pantry-db.service
+# Start with:   systemctl --user start chaudron-db.service
 #
-# Generated unit name is derived from the filename: pantry-db.service.
+# Generated unit name is derived from the filename: chaudron-db.service.
 
 [Unit]
-Description=Pantry — PostgreSQL 16
-Documentation=https://github.com/ClaraVnk/pantry
+Description=Chaudron — PostgreSQL 16
+Documentation=https://github.com/ClaraVnk/chaudron
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-ContainerName=pantry-db
+ContainerName=chaudron-db
 # Fully-qualified image name: rootless Podman must not rely on short-name
 # resolution, which is ambiguous and prompts interactively.
 Image=docker.io/library/postgres:16
 AutoUpdate=registry
 
 # Shared user-defined network so the API resolves the database by container
-# name. Create it once: podman network create pantry-net
-Network=pantry-net
+# name. Create it once: podman network create chaudron-net
+Network=chaudron-net
 
-# The database is never published to the host: only containers on pantry-net
+# The database is never published to the host: only containers on chaudron-net
 # reach it. Uncomment for local psql access, bound to loopback only.
 # PublishPort=127.0.0.1:5432:5432
 
@@ -31,18 +31,18 @@ Network=pantry-net
 # (system_u:object_r:container_file_t:s0:cN,cM). Without it, the container is
 # denied access under Enforcing. Use `:Z` — not `:z` — because no other
 # container shares this directory.
-Volume=%h/pantry/data/postgres:/var/lib/postgresql/data:Z
+Volume=%h/chaudron/data/postgres:/var/lib/postgresql/data:Z
 
-Environment=POSTGRES_DB=pantry
-Environment=POSTGRES_USER=pantry
+Environment=POSTGRES_DB=chaudron
+Environment=POSTGRES_USER=chaudron
 # Keep the cluster in a subdirectory so lost+found and friends never confuse initdb.
 Environment=PGDATA=/var/lib/postgresql/data/pgdata
 
 # Password comes from a Podman secret, never from this file.
-#   printf '%s' "$PW" | podman secret create pantry-db-password -
-Secret=pantry-db-password,type=env,target=POSTGRES_PASSWORD
+#   printf '%s' "$PW" | podman secret create chaudron-db-password -
+Secret=chaudron-db-password,type=env,target=POSTGRES_PASSWORD
 
-HealthCmd=pg_isready -U pantry -d pantry
+HealthCmd=pg_isready -U chaudron -d chaudron
 HealthInterval=10s
 HealthTimeout=5s
 HealthRetries=5

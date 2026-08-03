@@ -6,21 +6,21 @@ Accepté — 2026-08-03
 
 ## Contexte
 
-Le cas d'usage le plus évident de Pantry est le remplissage automatique du stock après une commande drive : l'utilisateur commande chez Courses U, Intermarché ou Chronodrive, et son stock se met à jour sans saisie. C'est la fonctionnalité que tout utilisateur demandera en premier.
+Le cas d'usage le plus évident de Chaudron est le remplissage automatique du stock après une commande drive : l'utilisateur commande chez Courses U, Intermarché ou Chronodrive, et son stock se met à jour sans saisie. C'est la fonctionnalité que tout utilisateur demandera en premier.
 
 Aucune de ces enseignes ne publie d'API partenaire accessible à un développeur individuel. Les seuls chemins techniques sont :
 
-1. **Scraping authentifié** : l'utilisateur confie ses identifiants enseigne à Pantry, qui se connecte à sa place et récupère l'historique de commandes.
+1. **Scraping authentifié** : l'utilisateur confie ses identifiants enseigne à Chaudron, qui se connecte à sa place et récupère l'historique de commandes.
 2. **Automatisation de navigateur** (Playwright headless) côté serveur, variante du précédent avec les mêmes prérequis de credentials.
 3. **Reverse-engineering des API mobiles** des applications enseigne.
 
 Les trois partagent les mêmes propriétés : ils exigent de stocker des identifiants réutilisables donnant accès à un compte marchand (moyens de paiement enregistrés, adresse, historique d'achats), ils violent les CGU de chaque enseigne, et ils cassent au premier changement de front-end — sans préavis, sans page de statut, sans version pinnable. Multiplié par le nombre d'enseignes françaises, c'est une charge de maintenance permanente et non planifiable.
 
-En phase 1 (usage familial), le risque est contenu. En phase 2 (ouverture publique), Pantry deviendrait un dépôt centralisé de credentials de comptes marchands : une cible dont la valeur pour un attaquant dépasse largement celle de la donnée métier de l'application.
+En phase 1 (usage familial), le risque est contenu. En phase 2 (ouverture publique), Chaudron deviendrait un dépôt centralisé de credentials de comptes marchands : une cible dont la valeur pour un attaquant dépasse largement celle de la donnée métier de l'application.
 
 ## Décision
 
-Pantry n'intègre aucun compte drive d'enseigne. Aucune fonctionnalité ne demande, ne stocke ni ne transmet d'identifiant de compte marchand.
+Chaudron n'intègre aucun compte drive d'enseigne. Aucune fonctionnalité ne demande, ne stocke ni ne transmet d'identifiant de compte marchand.
 
 L'alimentation du stock repose sur quatre voies, toutes initiées par l'utilisateur :
 
@@ -43,7 +43,7 @@ La voie 4 obtient une large part du bénéfice de l'intégration drive sans aucu
 
 ### Négatives
 
-- **On perd la fonctionnalité la plus attendue.** Un utilisateur qui compare Pantry à un concurrent intégré au drive verra un produit en retrait, et l'argument « c'est plus sûr » ne compense pas en démonstration.
+- **On perd la fonctionnalité la plus attendue.** Un utilisateur qui compare Chaudron à un concurrent intégré au drive verra un produit en retrait, et l'argument « c'est plus sûr » ne compense pas en démonstration.
 - Le transfert d'e-mail est un geste manuel à chaque commande. Une friction faible mais réelle, et le taux d'oubli sera élevé.
 - L'OCR de ticket et le parsing d'e-mail sont **approximatifs par nature** : libellés enseigne tronqués ou abrégés (`PAT SABL BEURRE 250G`), absence de code EAN sur le ticket, quantités implicites. Le rapprochement avec un référentiel produit exigera une étape de correction manuelle, elle-même une friction.
 - Chaque format d'e-mail de confirmation est un parseur à écrire et à maintenir. La charge est plus faible qu'un scraper, elle n'est pas nulle.

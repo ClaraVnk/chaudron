@@ -8,17 +8,17 @@ body:
   - type: markdown
     attributes:
       value: |
-        Pantry is in the **scoping** phase, which makes this a good moment for this kind of
+        Chaudron is in the **scoping** phase, which makes this a good moment for this kind of
         issue: the data model and the layer boundaries are not settled yet, so a well-argued
         proposal can still change the shape of the project cheaply.
 
         Two things worth checking first:
 
-        - **[`docs/adr/`](https://github.com/ClaraVnk/pantry/tree/main/docs/adr)** — some
+        - **[`docs/adr/`](https://github.com/ClaraVnk/chaudron/tree/main/docs/adr)** — some
           things are missing on purpose. Retailer drive integration, an application-funded
           inference mode, and a native mobile app were each considered and rejected with
           reasons. Reopening one of them is fine, but bring a new argument, not a preference.
-        - **[CONTRIBUTING.md](https://github.com/ClaraVnk/pantry/blob/main/CONTRIBUTING.md)**
+        - **[CONTRIBUTING.md](https://github.com/ClaraVnk/chaudron/blob/main/CONTRIBUTING.md)**
           — large features are best agreed on before anyone writes code.
 
         Please do not include API keys, passwords or any other credential in this issue.
@@ -51,7 +51,7 @@ body:
     attributes:
       label: Proposed solution
       description: >-
-        What you would like Pantry to do. Include how a user encounters it, what it does when a
+        What you would like Chaudron to do. Include how a user encounters it, what it does when a
         household has no model provider configured, and anything it would need to store.
     validations:
       required: true
@@ -98,7 +98,7 @@ body:
         boundary between layers, rules out a feature someone could reasonably expect, or
         creates a recurring cost. It is *not* required for a replaceable utility library, a
         naming convention, or a detail local to one module. See
-        [ADR 0001](https://github.com/ClaraVnk/pantry/blob/main/docs/adr/0001-record-architecture-decisions.md).
+        [ADR 0001](https://github.com/ClaraVnk/chaudron/blob/main/docs/adr/0001-record-architecture-decisions.md).
         Guessing wrong here costs nothing — it gets sorted out in triage.
       options:
         - "Yes — this is a structural decision and needs an ADR"

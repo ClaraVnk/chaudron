@@ -13,7 +13,7 @@ exists, is marked ``live_provider``, and never runs in pull-request CI --
 
 **Current state: everything skips.** No adapter exists yet, and neither do the
 domain ports. The suite is written so that it activates on its own, provider by
-provider, the moment ``pantry.infra.llm.contract:CONTRACT_ADAPTERS`` gains an
+provider, the moment ``chaudron.infra.llm.contract:CONTRACT_ADAPTERS`` gains an
 entry -- no edit to this file is needed to start testing a new adapter.
 
 What an adapter must expose to be tested is documented in `tests/README.md`.
@@ -40,10 +40,10 @@ pytestmark = pytest.mark.contract
 #: a registry missing an entry must fail a test, not silently shrink the matrix.
 PROVIDER_KEYS: Final[tuple[str, ...]] = ("anthropic", "openai", "gemini", "mistral", "ollama")
 
-_REGISTRY_MODULE: Final = "pantry.infra.llm.contract"
+_REGISTRY_MODULE: Final = "chaudron.infra.llm.contract"
 _REGISTRY_ATTR: Final = "CONTRACT_ADAPTERS"
-_PORTS_MODULE: Final = "pantry.domain.ports"
-_ERRORS_MODULE: Final = "pantry.domain.errors"
+_PORTS_MODULE: Final = "chaudron.domain.ports"
+_ERRORS_MODULE: Final = "chaudron.domain.errors"
 
 #: Port name -> the single coroutine every implementation must provide.
 _PORTS: Final[Mapping[str, str]] = {
@@ -240,7 +240,7 @@ async def test_provider_failures_become_domain_errors(
         await method()
 
     raised_module = type(raised.value).__module__
-    assert raised_module.startswith("pantry."), (
+    assert raised_module.startswith("chaudron."), (
         f"{adapter.key}: scenario {scenario!r} leaked {type(raised.value).__name__} from "
         f"{raised_module}; provider exceptions must be translated in the adapter"
     )
@@ -359,7 +359,7 @@ async def test_degradation_behaviour_matches_its_declared_case(
         # What matters, and what is asserted, is that it comes from the domain.
         with pytest.raises(Exception) as raised:
             await method()
-        assert type(raised.value).__module__.startswith("pantry."), (
+        assert type(raised.value).__module__.startswith("chaudron."), (
             f"{adapter.key}: an unavailable capability must fail with a domain error"
         )
         assert str(raised.value), (

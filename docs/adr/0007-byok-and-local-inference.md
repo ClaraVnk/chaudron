@@ -10,7 +10,7 @@ Les fonctionnalités de modèle (suggestions de recettes, extraction de ticket) 
 
 Le modèle par défaut d'une application SaaS — l'exploitant fournit l'accès au modèle et refacture — impose immédiatement : un plafond de dépense global à surveiller, une protection contre l'abus (un foyer qui génère des milliers de recettes vide le budget commun), un système de quotas, à terme une facturation, et la responsabilité du traitement des données de tous les utilisateurs auprès d'un fournisseur tiers.
 
-Pantry est un projet solo, en phase 1 familiale. Aucun de ces chantiers n'est finançable, et chacun serait une source permanente d'incidents.
+Chaudron est un projet solo, en phase 1 familiale. Aucun de ces chantiers n'est finançable, et chacun serait une source permanente d'incidents.
 
 Par ailleurs, une partie des utilisateurs cibles d'une application auto-hébergée voudra ne rien envoyer à un fournisseur externe. L'inférence locale n'est pas un repli dégradé pour eux : c'est la raison pour laquelle ils installent le produit.
 
@@ -26,7 +26,7 @@ Trois modes, stockés sur le foyer :
 | `ollama` | Une URL de base et un nom de modèle, aucune clé | Personne (calcul local) |
 | `instance_owner` | Rien : la clé lue dans l'environnement de l'instance | Le propriétaire de l'instance |
 
-**La clé du propriétaire de l'instance est strictement personnelle.** Le mode `instance_owner` n'est utilisable que par le foyer explicitement désigné comme propriétaire de l'instance (variable d'environnement dédiée). Il est **verrouillé par défaut** : tout autre foyer qui tente de le sélectionner reçoit un refus. Un foyer sans configuration valide n'a simplement pas accès aux fonctionnalités de modèle — les autres fonctions de Pantry (stock, liste de courses, scan EAN) restent entières.
+**La clé du propriétaire de l'instance est strictement personnelle.** Le mode `instance_owner` n'est utilisable que par le foyer explicitement désigné comme propriétaire de l'instance (variable d'environnement dédiée). Il est **verrouillé par défaut** : tout autre foyer qui tente de le sélectionner reçoit un refus. Un foyer sans configuration valide n'a simplement pas accès aux fonctionnalités de modèle — les autres fonctions de Chaudron (stock, liste de courses, scan EAN) restent entières.
 
 **Topologie Ollama — v1 : cas colocalisé uniquement.** Deux topologies existent, et elles ne sont pas réductibles l'une à l'autre :
 
@@ -53,7 +53,7 @@ Supporter le second cas exige une inversion : le backend renverrait un *bundle d
 ### Positives
 
 - **Aucun plafond de dépense global à gérer** : il n'y a pas de budget commun à protéger, donc pas de risque d'abus, pas de quotas, pas de facturation à construire.
-- La surface RGPD se réduit fortement : Pantry ne devient pas responsable de l'envoi des données de tous ses utilisateurs à un fournisseur tiers ; chaque foyer contracte directement, ou n'envoie rien.
+- La surface RGPD se réduit fortement : Chaudron ne devient pas responsable de l'envoi des données de tous ses utilisateurs à un fournisseur tiers ; chaque foyer contracte directement, ou n'envoie rien.
 - **Le foyer choisit sa juridiction.** Deux configurations gardent les données de consommation alimentaire sous juridiction européenne : `byok` avec Mistral AI (hébergé en UE) et `ollama` (rien ne sort de la machine). Ce critère est affiché dans l'interface de sélection du fournisseur (cf. ADR-0005), pas enfoui dans la documentation.
 - Le mode `ollama` rend un déploiement entièrement autonome possible, sans aucun appel sortant.
 - Le contrôle du coût reste entre les mains de celui qui le supporte : plafond de dépense côté fournisseur, choix du modèle, choix du moment.

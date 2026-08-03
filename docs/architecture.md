@@ -12,7 +12,7 @@ sont en anglais, conformément à la convention du projet.
 
 ## 1. Vue d'ensemble
 
-Pantry est une application auto-hébergeable composée de trois artefacts :
+Chaudron est une application auto-hébergeable composée de trois artefacts :
 
 | Artefact | Rôle | Technologie |
 |---|---|---|
@@ -33,7 +33,7 @@ Trois dépendances externes, toutes optionnelles ou remplaçables :
 ## 2. Découpage en couches
 
 ```
-backend/src/pantry/
+backend/src/chaudron/
 ├── api/        ← handlers HTTP, schémas d'entrée/sortie, authentification
 ├── services/   ← cas d'usage, orchestration, transactions
 ├── domain/     ← entités, règles métier, interfaces (ports)
@@ -169,12 +169,12 @@ n'importe quel fournisseur de messagerie. Détails dans
 Supporter Ollama n'est pas « ajouter un client HTTP ». Il y a deux situations
 irréconciliables, et il faut choisir laquelle on sert.
 
-**Cas A — Ollama colocalisé avec le backend.** L'utilisateur auto-héberge Pantry
+**Cas A — Ollama colocalisé avec le backend.** L'utilisateur auto-héberge Chaudron
 et fait tourner Ollama sur la même machine ou le même réseau que le serveur.
 L'appel est serveur → serveur, trivial. C'est le cas de l'auto-hébergeur.
 
 **Cas B — Ollama sur la machine de l'utilisateur.** L'utilisateur se connecte à
-une instance Pantry hébergée ailleurs, mais son Ollama tourne sur son portable ou
+une instance Chaudron hébergée ailleurs, mais son Ollama tourne sur son portable ou
 son NAS, derrière un NAT. **Le backend ne peut pas l'atteindre.** Le seul
 composant du système qui peut joindre ce Ollama est le navigateur de
 l'utilisateur.

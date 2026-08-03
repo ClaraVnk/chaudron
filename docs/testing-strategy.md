@@ -43,7 +43,7 @@ lisent dans la sortie de `pytest -ra`, et c'est la seule raison pour laquelle de
 
 ## 2. La pyramide retenue
 
-Pas de proportions dogmatiques : la forme découle de la nature du système. Pantry est
+Pas de proportions dogmatiques : la forme découle de la nature du système. Chaudron est
 une application dont l'essentiel du risque est concentré sur trois points — les
 règles de quantités, l'étanchéité entre foyers, et le comportement face à des
 fournisseurs de modèles hétérogènes. C'est là que porte l'effort.
@@ -122,7 +122,7 @@ pas de client HTTP, pas d'horloge système. Concrètement :
 
 1. `ban-relative-imports` et `known-first-party` sont déjà configurés dans `ruff` ;
 2. un test d'architecture (à écrire dès que `domain/` contient de la logique) qui
-   parcourt les modules de `pantry.domain` et échoue si l'un d'eux importe
+   parcourt les modules de `chaudron.domain` et échoue si l'un d'eux importe
    `sqlalchemy`, `fastapi`, `httpx` ou un SDK de fournisseur. C'est dix lignes
    d'`ast`, et c'est le seul moyen de rendre la règle exécutoire plutôt que
    déclarative ;
@@ -257,7 +257,7 @@ chacun des cinq fournisseurs :
    dépassé, 5xx), `ProviderQuotaExceeded` (limite de débit, quota épuisé),
    `ProviderResponseInvalid` (charge utile malformée, schéma violé). L'assertion
    décisive n'est pas le type levé mais **son module** : une exception dont le module
-   ne commence pas par `pantry.` a franchi la frontière, et c'est le
+   ne commence pas par `chaudron.` a franchi la frontière, et c'est le
    `except AnthropicError` égaré dans une route que l'ADR cherche à éviter. On
    vérifie aussi que le message n'est pas vide : le diagnostic de support a besoin du
    fournisseur, du modèle et du mode d'échec.
@@ -294,7 +294,7 @@ Deux axes de paramétrisation croisés, et une découverte dynamique :
 - une fixture `provider_key` paramétrée sur les cinq clés
   (`anthropic`, `openai`, `gemini`, `mistral`, `ollama`) ;
 - une fixture `adapter` qui résout la clé dans le registre
-  `pantry.infra.llm.contract:CONTRACT_ADAPTERS` ;
+  `chaudron.infra.llm.contract:CONTRACT_ADAPTERS` ;
 - des paramétrisations par port, par scénario d'échec et par capacité.
 
 Aujourd'hui le registre n'existe pas : les 145 cas sont collectés et **skippés** avec
@@ -500,7 +500,7 @@ physiques.
 
 La CI existante (`.github/workflows/ci.yml`) enchaîne lint → format → mypy → pytest
 sur un service `postgres:16` → image Podman → audit de dépendances et scan de
-secrets. La stratégie s'y insère sans la modifier : `PANTRY_DATABASE_URL` est déjà
+secrets. La stratégie s'y insère sans la modifier : `CHAUDRON_DATABASE_URL` est déjà
 posée par le job de test, et les fixtures la préfèrent à tout démarrage de conteneur.
 
 En local, aucune variable n'est nécessaire : un PostgreSQL 16 éphémère est démarré

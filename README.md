@@ -1,14 +1,14 @@
 <div align="center">
 
-# 🥫 Pantry
+# 🍲 Chaudron
 
-**Know what's in your fridge. Cook from what you actually have.**
+**Throw in what you have. See what comes out.**
 
-Self-hostable food stock management with AI recipe suggestions and receipt scanning —
-running on *your* model, *your* key, *your* server.
+Self-hostable food stock management with AI recipe suggestions and receipt
+scanning — running on *your* model, *your* key, *your* server.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![CI](https://github.com/ClaraVnk/pantry/actions/workflows/ci.yml/badge.svg)](https://github.com/ClaraVnk/pantry/actions/workflows/ci.yml)
+[![CI](https://github.com/ClaraVnk/chaudron/actions/workflows/ci.yml/badge.svg)](https://github.com/ClaraVnk/chaudron/actions/workflows/ci.yml)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with mypy](https://img.shields.io/badge/mypy-strict-2A6DB2.svg)](https://mypy-lang.org/)
@@ -20,7 +20,7 @@ running on *your* model, *your* key, *your* server.
 ---
 
 > [!WARNING]
-> **Pantry is in the scoping phase.** This repository currently contains the
+> **Chaudron is in the scoping phase.** This repository currently contains the
 > architecture, the decision records and the project baseline — **not a working
 > application**. There is nothing to install yet. Issues and feedback on the
 > design are the most valuable contribution right now.
@@ -36,8 +36,8 @@ Most food inventory apps want your data, your subscription, or both. The ones
 that generate recipes send your grocery habits to a service you don't control,
 and stop working when the company pivots.
 
-Pantry takes the opposite position: **you host it, and you bring your own
-model.** There is no Pantry cloud, no Pantry account, no Pantry API key. The
+Chaudron takes the opposite position: **you host it, and you bring your own
+model.** There is no Chaudron cloud, no Chaudron account, no Chaudron API key. The
 application never pays for anyone's inference and never sees anyone's data.
 
 ## Features
@@ -85,7 +85,7 @@ Supported providers:
 Providers are not equivalent. Reading a creased, faded thermal receipt is hard,
 and a small local model will do it worse than a frontier one.
 
-Pantry does not paper over this. Providers **declare their capabilities**, and
+Chaudron does not paper over this. Providers **declare their capabilities**, and
 the interface tells you what you're getting:
 
 - Missing a capability that can be approximated → the feature works, with a
@@ -97,7 +97,7 @@ the interface tells you what you're getting:
 
 You will never discover a limitation at the moment it breaks.
 
-## What Pantry deliberately does not do
+## What Chaudron deliberately does not do
 
 **It does not connect to retailer drive accounts** (Courses U, Intermarché
 Drive, Chronodrive and the like). None of them expose a public client API. The
@@ -159,18 +159,18 @@ Every business table carries a `household_id`, from the very first commit. See
 Requires [uv](https://docs.astral.sh/uv/), Podman, and Node.js 22+.
 
 ```sh
-git clone https://github.com/ClaraVnk/pantry.git && cd pantry
+git clone https://github.com/ClaraVnk/chaudron.git && cd chaudron
 cp .env.example .env          # the app refuses to start if this is incomplete
 
 # Database
-podman run -d --name pantry-db \
+podman run -d --name chaudron-db \
   -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
-  -v pantry-db-data:/var/lib/postgresql/data:Z \
+  -v chaudron-db-data:/var/lib/postgresql/data:Z \
   -p 127.0.0.1:5432:5432 docker.io/library/postgres:16   # loopback only, never 0.0.0.0
 
 # Backend
 cd backend && uv sync && uv run alembic upgrade head
-uv run uvicorn pantry.api.main:app --reload
+uv run uvicorn chaudron.api.main:app --reload
 
 # Frontend
 cd frontend && npm install && npm run dev
@@ -220,7 +220,7 @@ Security issues go through [SECURITY.md](SECURITY.md) — not public issues.
 
 [GNU AGPL v3.0 or later](LICENSE).
 
-Copyleft that covers network use: if you run a modified Pantry as a service, you
+Copyleft that covers network use: if you run a modified Chaudron as a service, you
 owe your users the source. That is deliberate — this project exists so people
 can own their food data, and a closed fork serving it back to them would defeat
 the point.

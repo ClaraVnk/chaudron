@@ -1,6 +1,6 @@
-# Pantry — Operations
+# Chaudron — Operations
 
-Build, run and deploy Pantry with **Podman**. There is no Docker anywhere in
+Build, run and deploy Chaudron with **Podman**. There is no Docker anywhere in
 this project: the container engine is Podman, images are built from
 `Containerfile`s, and services run as rootless systemd **quadlets**.
 
@@ -13,8 +13,8 @@ dedicated unprivileged user.
 
 | File | Purpose |
 | --- | --- |
-| `pantry.container` | Quadlet unit for the API |
-| `pantry-db.container` | Quadlet unit for PostgreSQL 16 |
+| `chaudron.container` | Quadlet unit for the API |
+| `chaudron-db.container` | Quadlet unit for PostgreSQL 16 |
 
 ---
 
@@ -36,13 +36,13 @@ If a script must stay portable across engines, use
 Both containers resolve each other by name on a user-defined network.
 
 ```sh
-podman network create pantry-net
+podman network create chaudron-net
 ```
 
 ### 1.3 Create the data directories
 
 ```sh
-mkdir -p ~/pantry/data/postgres ~/pantry/data/uploads
+mkdir -p ~/chaudron/data/postgres ~/chaudron/data/uploads
 ```
 
 ### 1.4 Start PostgreSQL 16
@@ -51,18 +51,18 @@ The password is passed through a Podman secret, never on the command line
 (arguments are visible in `ps` and land in shell history):
 
 ```sh
-read -rs -p 'Postgres password: ' PW && printf '%s' "$PW" | podman secret create pantry-db-password - && unset PW
+read -rs -p 'Postgres password: ' PW && printf '%s' "$PW" | podman secret create chaudron-db-password - && unset PW
 ```
 
 ```sh
-podman run -d --name pantry-db \
-  --network pantry-net \
-  --secret pantry-db-password,type=env,target=POSTGRES_PASSWORD \
-  -e POSTGRES_DB=pantry \
-  -e POSTGRES_USER=pantry \
+podman run -d --name chaudron-db \
+  --network chaudron-net \
+  --secret chaudron-db-password,type=env,target=POSTGRES_PASSWORD \
+  -e POSTGRES_DB=chaudron \
+  -e POSTGRES_USER=chaudron \
   -e PGDATA=/var/lib/postgresql/data/pgdata \
-  -v ~/pantry/data/postgres:/var/lib/postgresql/data:Z \
-  --health-cmd 'pg_isready -U pantry -d pantry' \
+  -v ~/chaudron/data/postgres:/var/lib/postgresql/data:Z \
+  --health-cmd 'pg_isready -U chaudron -d chaudron' \
   docker.io/library/postgres:16
 ```
 
@@ -74,7 +74,7 @@ podman run -d --name pantry-db \
 Wait until it is healthy:
 
 ```sh
-podman healthcheck run pantry-db && podman inspect -f '{{ .State.Health.Status }}' pantry-db
+podman healthcheck run chaudron-db && podman inspect -f '{{ .State.Health.Status }}' chaudron-db
 ```
 
 ### 1.5 Build the API image
@@ -85,18 +85,18 @@ baked-in healthcheck in the image. (Quadlet deployments declare `HealthCmd=`
 themselves and do not depend on it.)
 
 ```sh
-podman build --format docker -t localhost/pantry-api:dev -f backend/Containerfile backend
+podman build --format docker -t localhost/chaudron-api:dev -f backend/Containerfile backend
 ```
 
 ### 1.6 Run the API
 
 ```sh
-podman run -d --name pantry \
-  --network pantry-net \
+podman run -d --name chaudron \
+  --network chaudron-net \
   -p 127.0.0.1:8000:8000 \
   --env-file ./.env \
-  -v ~/pantry/data/uploads:/var/lib/pantry/uploads:Z \
-  localhost/pantry-api:dev
+  -v ~/chaudron/data/uploads:/var/lib/chaudron/uploads:Z \
+  localhost/chaudron-api:dev
 ```
 
 Check both endpoints — they are deliberately separate:
@@ -112,8 +112,8 @@ dependency is down — do not restart the container, fix the dependency.
 ### 1.7 Tear down
 
 ```sh
-podman rm -f pantry pantry-db
-podman network rm pantry-net
+podman rm -f chaudron chaudron-db
+podman network rm chaudron-net
 ```
 
 ---
@@ -127,15 +127,15 @@ survive logout and start at boot.
 ### 2.1 Prepare the service account
 
 ```sh
-sudo useradd --create-home --shell /usr/sbin/nologin pantry
-sudo loginctl enable-linger pantry
+sudo useradd --create-home --shell /usr/sbin/nologin chaudron
+sudo loginctl enable-linger chaudron
 ```
 
 Everything below runs **as that user**:
 
 ```sh
-sudo -u pantry XDG_RUNTIME_DIR=/run/user/$(id -u pantry) \
-  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u pantry)/bus \
+sudo -u chaudron XDG_RUNTIME_DIR=/run/user/$(id -u chaudron) \
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u chaudron)/bus \
   systemctl --user <command>
 ```
 
@@ -145,58 +145,58 @@ fails with *"Failed to connect to bus"*.
 ### 2.2 Install the units
 
 ```sh
-install -d -m 0755 ~pantry/.config/containers/systemd
-install -m 0644 ops/pantry.container ops/pantry-db.container \
-  ~pantry/.config/containers/systemd/
+install -d -m 0755 ~chaudron/.config/containers/systemd
+install -m 0644 ops/chaudron.container ops/chaudron-db.container \
+  ~chaudron/.config/containers/systemd/
 ```
 
 Create the runtime state the units expect:
 
 ```sh
-podman network create pantry-net
-mkdir -p ~/pantry/data/postgres ~/pantry/data/uploads
+podman network create chaudron-net
+mkdir -p ~/chaudron/data/postgres ~/chaudron/data/uploads
 ```
 
 ### 2.3 Create the secrets
 
 Each command is a single line with masked input, transmitted over stdin, and
-run **on the server as the `pantry` user**. `printf '%s'` matters: `echo` and
+run **on the server as the `chaudron` user**. `printf '%s'` matters: `echo` and
 `podman secret create <file>` both keep a trailing newline, which is invisible
 until the value crosses an HTTP header or an HTML form and silently fails.
 
 ```sh
-read -rs -p 'DB password: ' V && printf '%s' "$V" | podman secret create pantry-db-password - && unset V
+read -rs -p 'DB password: ' V && printf '%s' "$V" | podman secret create chaudron-db-password - && unset V
 ```
 
 ```sh
-read -rs -p 'App secret key: ' V && printf '%s' "$V" | podman secret create pantry-secret-key - && unset V
+read -rs -p 'App secret key: ' V && printf '%s' "$V" | podman secret create chaudron-secret-key - && unset V
 ```
 
 ```sh
-read -rs -p 'Anthropic API key: ' V && printf '%s' "$V" | podman secret create pantry-anthropic-api-key - && unset V
+read -rs -p 'Anthropic API key: ' V && printf '%s' "$V" | podman secret create chaudron-anthropic-api-key - && unset V
 ```
 
 ```sh
-read -rs -p 'Inbound email webhook key: ' V && printf '%s' "$V" | podman secret create pantry-inbound-email-key - && unset V
+read -rs -p 'Inbound email webhook key: ' V && printf '%s' "$V" | podman secret create chaudron-inbound-email-key - && unset V
 ```
 
 ### 2.4 Non-secret configuration
 
-Copy `.env.example` to `~pantry/pantry.env`, fill in the non-secret keys, and
-restrict its permissions. `EnvironmentFile=` in `pantry.container` points at it.
+Copy `.env.example` to `~chaudron/chaudron.env`, fill in the non-secret keys, and
+restrict its permissions. `EnvironmentFile=` in `chaudron.container` points at it.
 
 ```sh
-install -m 0600 /dev/null ~pantry/pantry.env
+install -m 0600 /dev/null ~chaudron/chaudron.env
 ```
 
 ### 2.5 Start
 
 ```sh
 systemctl --user daemon-reload
-systemctl --user start pantry-db.service
-systemctl --user start pantry.service
-systemctl --user status pantry.service
-journalctl --user -u pantry.service -f
+systemctl --user start chaudron-db.service
+systemctl --user start chaudron.service
+systemctl --user status chaudron.service
+journalctl --user -u chaudron.service -f
 ```
 
 Quadlet units are **not** enabled with `systemctl enable`. The generator reads
@@ -206,9 +206,9 @@ Quadlet units are **not** enabled with `systemctl enable`. The generator reads
 ### 2.6 Update to a new image
 
 ```sh
-podman pull <registry>/pantry-api:<tag>
-podman tag <registry>/pantry-api:<tag> localhost/pantry-api:latest
-systemctl --user restart pantry.service
+podman pull <registry>/chaudron-api:<tag>
+podman tag <registry>/chaudron-api:<tag> localhost/chaudron-api:latest
+systemctl --user restart chaudron.service
 ```
 
 Rollback is the same sequence with the previous tag. Always keep the previous
@@ -222,7 +222,7 @@ Do **not** run `setenforce 0`. Every problem below has a targeted fix.
 
 | Symptom | Check | Fix |
 | --- | --- | --- |
-| Container cannot read/write a bind mount | `ls -Z ~/pantry/data/postgres` | Add `:Z` to the `Volume=` line, or `restorecon -Rv <path>` |
+| Container cannot read/write a bind mount | `ls -Z ~/chaudron/data/postgres` | Add `:Z` to the `Volume=` line, or `restorecon -Rv <path>` |
 | Denials with no obvious cause | `sudo ausearch -m AVC -ts recent` | Feed the output to `audit2why` before changing anything |
 | Service binds a non-standard port | `sudo semanage port -l \| grep <port>` | `sudo semanage port -a -t http_port_t -p tcp <port>` |
 | Reverse proxy cannot reach the API | `getsebool httpd_can_network_connect` | `sudo setsebool -P httpd_can_network_connect on` |
@@ -231,8 +231,8 @@ Useful one-liners:
 
 ```sh
 getenforce
-ls -Z ~/pantry/data
-ps -eZ | grep pantry
+ls -Z ~/chaudron/data
+ps -eZ | grep chaudron
 sudo ausearch -m AVC -ts recent | audit2why
 ```
 
@@ -244,7 +244,7 @@ start works and every subsequent start breaks with permission errors. Set
 ownership on the host once instead:
 
 ```sh
-podman unshare chown -R 10001:10001 ~/pantry/data/uploads
+podman unshare chown -R 10001:10001 ~/chaudron/data/uploads
 ```
 
 ---
@@ -254,13 +254,13 @@ podman unshare chown -R 10001:10001 ~/pantry/data/uploads
 PostgreSQL is backed up with `pg_dump`, not by copying the data directory.
 
 ```sh
-podman exec pantry-db pg_dump -U pantry -d pantry --format=custom > pantry-$(date -I).dump
+podman exec chaudron-db pg_dump -U chaudron -d chaudron --format=custom > chaudron-$(date -I).dump
 ```
 
 Restore into an empty database:
 
 ```sh
-podman exec -i pantry-db pg_restore -U pantry -d pantry --clean --if-exists < pantry-YYYY-MM-DD.dump
+podman exec -i chaudron-db pg_restore -U chaudron -d chaudron --clean --if-exists < chaudron-YYYY-MM-DD.dump
 ```
 
 Verify a restore against a scratch database before any migration that drops or
@@ -270,7 +270,7 @@ rewrites data.
 
 ## 5. Continuous deployment
 
-Production follows `ghcr.io/claravnk/pantry:latest`. A merge to `main` reaches
+Production follows `ghcr.io/claravnk/chaudron:latest`. A merge to `main` reaches
 the server within 15 minutes, unattended.
 
 ### How the chain fits together
@@ -280,7 +280,7 @@ merge to main → CI passes → publish.yml pushes :latest to GHCR
                                         ↓  (≤ 15 min)
               podman-auto-update.timer sees a new digest
                                         ↓
-              pantry.service restarts on the new image
+              chaudron.service restarts on the new image
                                         ↓
               health check fails? → Podman rolls back automatically
 ```
@@ -288,7 +288,7 @@ merge to main → CI passes → publish.yml pushes :latest to GHCR
 Two units make this work, and both must be installed:
 
 ```sh
-# 1. The quadlet already declares AutoUpdate=registry (see pantry.container).
+# 1. The quadlet already declares AutoUpdate=registry (see chaudron.container).
 
 # 2. Override the stock timer, which only fires once a day.
 mkdir -p ~/.config/systemd/user/podman-auto-update.timer.d
@@ -328,13 +328,13 @@ first, pin the service to the previous image and disable the timer:
 
 ```sh
 systemctl --user stop podman-auto-update.timer
-podman tag ghcr.io/claravnk/pantry:<good-sha> ghcr.io/claravnk/pantry:latest
-systemctl --user restart pantry.service
+podman tag ghcr.io/claravnk/chaudron:<good-sha> ghcr.io/claravnk/chaudron:latest
+systemctl --user restart chaudron.service
 ```
 
 ### Migrations are deliberately outside this loop
 
-`pantry-migrate.container` has no `AutoUpdate=` and no `[Install]` section: it
+`chaudron-migrate.container` has no `AutoUpdate=` and no `[Install]` section: it
 never runs on its own. That is the point.
 
 If migrations ran in the API entrypoint, this pipeline would apply schema changes
@@ -346,8 +346,8 @@ failure it was undoing.
 For a release carrying a migration:
 
 ```sh
-systemctl --user start pantry-migrate.service
-journalctl --user -u pantry-migrate.service -n 50     # read it before continuing
+systemctl --user start chaudron-migrate.service
+journalctl --user -u chaudron-migrate.service -n 50     # read it before continuing
 podman auto-update                                     # then let the API roll
 ```
 

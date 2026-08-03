@@ -1,4 +1,4 @@
-"""Shared fixtures for the Pantry backend test suite.
+"""Shared fixtures for the Chaudron backend test suite.
 
 Two rules shape everything below.
 
@@ -13,8 +13,8 @@ Two rules shape everything below.
 
 The database is resolved in this order:
 
-1. ``PANTRY_TEST_DATABASE_URL`` -- explicit override, wins over everything.
-2. ``PANTRY_DATABASE_URL`` -- what CI sets for its ``postgres:16`` service.
+1. ``CHAUDRON_TEST_DATABASE_URL`` -- explicit override, wins over everything.
+2. ``CHAUDRON_DATABASE_URL`` -- what CI sets for its ``postgres:16`` service.
 3. An ephemeral container started here.
 
 If none of the three can be obtained, the database fixtures **skip** with the
@@ -37,7 +37,7 @@ from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from pantry.domain.models import (
+from chaudron.domain.models import (
     Base,
     Household,
     HouseholdMember,
@@ -55,11 +55,11 @@ if TYPE_CHECKING:
 _POSTGRES_IMAGE: Final = "postgres:16"
 
 # Checked in order; the first one set wins.
-_DATABASE_URL_ENV_VARS: Final = ("PANTRY_TEST_DATABASE_URL", "PANTRY_DATABASE_URL")
+_DATABASE_URL_ENV_VARS: Final = ("CHAUDRON_TEST_DATABASE_URL", "CHAUDRON_DATABASE_URL")
 
 _PODMAN_SETUP_HINT: Final = (
     "Enable the rootless Podman socket with "
-    "`systemctl --user enable --now podman.socket`, or set PANTRY_TEST_DATABASE_URL "
+    "`systemctl --user enable --now podman.socket`, or set CHAUDRON_TEST_DATABASE_URL "
     "to an existing PostgreSQL 16 instance."
 )
 
@@ -352,7 +352,7 @@ def api_client() -> httpx.AsyncClient:
     and inventing any of them would produce a fixture that silently tests something
     other than the application:
 
-    1. An application factory (``pantry.api.app:create_app`` or equivalent) -- the
+    1. An application factory (``chaudron.api.app:create_app`` or equivalent) -- the
        ``api`` package is still empty.
     2. A dependency override binding the request-scoped session to :func:`db_session`,
        so requests join the test transaction and are rolled back with it.
@@ -362,7 +362,7 @@ def api_client() -> httpx.AsyncClient:
        bypass the very code the isolation tests exist to exercise.
     """
     pytest.skip(
-        "no HTTP client fixture yet: pantry.api exposes no application factory, "
+        "no HTTP client fixture yet: chaudron.api exposes no application factory, "
         "no session dependency to override, and no auth context to build a "
         "HouseholdScope from. See the docstring of tests.conftest.api_client."
     )

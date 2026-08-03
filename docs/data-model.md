@@ -1,16 +1,16 @@
-# Pantry — modèle de données
+# Chaudron — modèle de données
 
 > Document de cadrage interne. Rédigé en français ; **tous les identifiants cités
 > (tables, colonnes, types, valeurs d'enum) sont en anglais** et font foi tels quels.
 > Cible : PostgreSQL 16, SQLAlchemy 2.x déclaratif, Alembic.
 > Statut : proposition à valider. Le squelette correspondant est dans
-> `backend/src/pantry/domain/models.py` — il n'est câblé à rien pour l'instant.
+> `backend/src/chaudron/domain/models.py` — il n'est câblé à rien pour l'instant.
 
 ---
 
 ## 1. Objet et portée
 
-Pantry gère le stock alimentaire d'un **foyer** (`household`) et lui propose des
+Chaudron gère le stock alimentaire d'un **foyer** (`household`) et lui propose des
 recettes générées par un modèle, en fonction de ce qui est réellement disponible.
 
 Le modèle doit tenir deux ans et deux phases :
@@ -289,7 +289,7 @@ placard, cave). Configurable par foyer, parce que « frigo du garage » existe.
 | `id` | `uuid` PK | |
 | `household_id` | `uuid` NOT NULL, FK → `household(id)` ON DELETE CASCADE | |
 | `name` | `varchar(80)` NOT NULL | |
-| `kind` | `storage_kind` NOT NULL | `fridge` \| `freezer` \| `pantry` \| `cellar` \| `other` |
+| `kind` | `storage_kind` NOT NULL | `fridge` \| `freezer` \| `chaudron` \| `cellar` \| `other` |
 | `sort_order` | `smallint` NOT NULL DEFAULT 0 | |
 | `created_at` | `timestamptz` NOT NULL | |
 | `archived_at` | `timestamptz` NULL | |
@@ -843,7 +843,7 @@ trancher (§11).
 l'activation triviale.** Concrètement, dès la première migration :
 
 - `household_id` partout (fait) ;
-- un rôle applicatif **non-propriétaire** des tables (`pantry_app`), car le
+- un rôle applicatif **non-propriétaire** des tables (`chaudron_app`), car le
   propriétaire contourne RLS sauf `FORCE ROW LEVEL SECURITY` ;
 - un `SET LOCAL app.household_id = …` émis **dans la transaction** par le middleware,
   et donc une discipline « une requête HTTP = une transaction » établie tout de

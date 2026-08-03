@@ -6,7 +6,7 @@ Accepté — 2026-08-03
 
 ## Contexte
 
-Pantry est développé en solo. Les décisions structurantes (choix de stack, périmètre fonctionnel, modèle de données multi-tenant) se prennent en quelques minutes et s'oublient en quelques semaines. Six mois plus tard, la question n'est plus « qu'est-ce qu'on a choisi » — le code le dit — mais « pourquoi », et surtout « qu'est-ce qu'on avait écarté, et pour quelle raison ». Sans trace, chaque relecture rejoue le même arbitrage à partir de zéro, souvent avec moins de contexte qu'à l'origine.
+Chaudron est développé en solo. Les décisions structurantes (choix de stack, périmètre fonctionnel, modèle de données multi-tenant) se prennent en quelques minutes et s'oublient en quelques semaines. Six mois plus tard, la question n'est plus « qu'est-ce qu'on a choisi » — le code le dit — mais « pourquoi », et surtout « qu'est-ce qu'on avait écarté, et pour quelle raison ». Sans trace, chaque relecture rejoue le même arbitrage à partir de zéro, souvent avec moins de contexte qu'à l'origine.
 
 Le risque est amplifié par la phase 2 envisagée (ouverture publique multi-utilisateurs) : des décisions prises pour un usage familial devront être réévaluées, et il faut pouvoir distinguer ce qui était un compromis assumé de ce qui était une contrainte réelle.
 

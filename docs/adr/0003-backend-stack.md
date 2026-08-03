@@ -6,7 +6,7 @@ Accepté — 2026-08-03
 
 ## Contexte
 
-Pantry expose une API consommée par une PWA React séparée (cf. ADR-0004), et doit traiter des charges hétérogènes : requêtes CRUD courtes sur le stock, appels sortants lents et imprévisibles vers des modèles de langage (cf. ADR-0005), et appels à Open Food Facts pour la résolution EAN. Ces appels sortants dominent le temps de réponse et sont majoritairement de l'attente réseau.
+Chaudron expose une API consommée par une PWA React séparée (cf. ADR-0004), et doit traiter des charges hétérogènes : requêtes CRUD courtes sur le stock, appels sortants lents et imprévisibles vers des modèles de langage (cf. ADR-0005), et appels à Open Food Facts pour la résolution EAN. Ces appels sortants dominent le temps de réponse et sont majoritairement de l'attente réseau.
 
 Le développeur est seul et connaît Python. Le déploiement visé est un VPS Rocky Linux 10 en SELinux Enforcing, via quadlets systemd et conteneurs Podman.
 

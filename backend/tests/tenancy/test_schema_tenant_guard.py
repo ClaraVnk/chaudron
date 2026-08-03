@@ -23,7 +23,7 @@ from typing import Final
 import pytest
 from sqlalchemy import Table, UniqueConstraint
 
-from pantry.domain.models import Base
+from chaudron.domain.models import Base
 
 _TENANT_COLUMN: Final = "household_id"
 

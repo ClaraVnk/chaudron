@@ -6,7 +6,7 @@ Accepté — 2026-08-03
 
 ## Contexte
 
-En phase 1, Pantry sert un seul foyer. La modélisation la plus économique serait donc mono-tenant : des tables `item`, `stock_entry`, `shopping_list_item` sans notion de propriétaire, et une authentification réduite à un utilisateur unique.
+En phase 1, Chaudron sert un seul foyer. La modélisation la plus économique serait donc mono-tenant : des tables `item`, `stock_entry`, `shopping_list_item` sans notion de propriétaire, et une authentification réduite à un utilisateur unique.
 
 La phase 2 envisagée est une ouverture publique multi-utilisateurs. Le stock, la liste de courses et l'historique d'achats appartiennent à un **foyer**, pas à une personne : deux conjoints partagent le même frigo et doivent voir le même stock. L'unité d'isolation naturelle est donc le foyer (`household`), pas l'utilisateur.
 

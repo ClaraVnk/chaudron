@@ -1,13 +1,13 @@
 # Security Policy
 
-Pantry stores third-party API keys, personal purchase history and photographs of
+Chaudron stores third-party API keys, personal purchase history and photographs of
 till receipts. A vulnerability here has a real cost for the people running an
 instance, so reports are welcome and taken seriously — including reports about
 design documents, before a single line of the affected code exists.
 
 ## Project status
 
-Pantry is in the **scoping** phase. The repository holds architecture documents,
+Chaudron is in the **scoping** phase. The repository holds architecture documents,
 architecture decision records (ADRs), a project skeleton and a CI pipeline. There
 is no feature code, no release, and no deployed instance to attack.
 
@@ -32,7 +32,7 @@ Consequently:
 channels:
 
 1. **GitHub Private Vulnerability Reporting — preferred.** Go to the
-   [Security tab](https://github.com/ClaraVnk/pantry/security/advisories/new) of
+   [Security tab](https://github.com/ClaraVnk/chaudron/security/advisories/new) of
    this repository and open a private advisory. The report stays private, the
    discussion happens in one place, and a CVE can be requested from the same
    thread if one turns out to be warranted.
@@ -45,7 +45,7 @@ channels:
 
 Not in the advisory, not in an email, not in an attached log, not in a
 screenshot. This includes provider API keys (`sk-ant-…`, Gemini keys), the
-instance `PANTRY_SECRET_KEY`, database passwords, JWTs cut from a live session,
+instance `CHAUDRON_SECRET_KEY`, database passwords, JWTs cut from a live session,
 and the inbound-email webhook key.
 
 If a proof of concept needs a credential, **generate a throwaway one** and say so.
@@ -65,7 +65,7 @@ it then has to be rotated, and a deleted message does not rotate anything.
 
 ## Response targets
 
-Pantry is maintained by one person, unpaid. The targets below are commitments of
+Chaudron is maintained by one person, unpaid. The targets below are commitments of
 effort, not of a service level:
 
 | Step | Target |
@@ -123,7 +123,7 @@ rather than from the authenticated session. So is any lock-down of the
 ### 4. Inbound-email webhook
 
 Forwarded order confirmations arrive through a webhook authenticated by a shared
-secret (`PANTRY_INBOUND_EMAIL_WEBHOOK_KEY`). In scope: signature verification
+secret (`CHAUDRON_INBOUND_EMAIL_WEBHOOK_KEY`). In scope: signature verification
 that can be skipped, replayed or defeated by a non-constant-time comparison;
 attributing a forwarded email to a household that did not send it; attachment
 handling that ignores the size limit, escapes its storage directory, or parses
@@ -142,18 +142,18 @@ request the household did not consent to.
 ### 6. Everything else in the repository
 
 Also in scope: authentication and session handling (JWT signing, token lifetime,
-`PANTRY_SECRET_KEY` handling), CORS configuration, dependency vulnerabilities,
+`CHAUDRON_SECRET_KEY` handling), CORS configuration, dependency vulnerabilities,
 the container image and its quadlet units (privileges, secret handling, SELinux
 labelling), and the CI workflows (anything that lets a fork's pull request read a
 repository secret).
 
 ## Out of scope
 
-- Findings from automated scanners with no demonstrated impact on Pantry.
+- Findings from automated scanners with no demonstrated impact on Chaudron.
 - Missing hardening headers or TLS configuration on an instance, when the
   reverse proxy is the operator's responsibility.
 - Vulnerabilities in Open Food Facts, a model provider, Ollama, or an inbound
-  email service — report those to their maintainers. The way Pantry *calls*
+  email service — report those to their maintainers. The way Chaudron *calls*
   them is in scope.
 - Attacks requiring an already-compromised host or an already-privileged
   instance operator.

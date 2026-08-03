@@ -1,6 +1,6 @@
 # Note technique de faisabilité — scan de code-barres et résolution EAN
 
-**Projet :** Pantry (PWA React + Vite / backend FastAPI) — gestion de stock alimentaire domestique
+**Projet :** Chaudron (PWA React + Vite / backend FastAPI) — gestion de stock alimentaire domestique
 **Date :** 3 août 2026
 **Statut :** note de cadrage, à relire avant de figer l'architecture du module « scan »
 
@@ -260,9 +260,9 @@ Toutes ces obligations sont dans la doc officielle **[V]** (<https://github.com/
 
 La doc ajoute un avertissement à propos des images : *« They may contain graphical elements subject to copyright or other rights »* — les emballages photographiés contiennent des logos et visuels de marque qui restent la propriété de leurs titulaires. Afficher une vignette dans une app privée d'inventaire domestique est sans enjeu ; republier ces images le serait davantage.
 
-**ODbL = attribution + share-alike.** Concrètement pour Pantry :
+**ODbL = attribution + share-alike.** Concrètement pour Chaudron :
 - afficher une attribution « Données produits : Open Food Facts — ODbL » quelque part dans l'UI ;
-- le share-alike mord **si l'on combine la base OFF avec une autre base** : la base dérivée devrait alors être publiée en open data. Un cache de fiches produits juxtaposé à un stock personnel est un cas limite ; pour un usage privé non redistribué, la question ne se pose pas en pratique. **Elle se poserait si Pantry devenait un service multi-utilisateurs public.** À trancher avant, pas après.
+- le share-alike mord **si l'on combine la base OFF avec une autre base** : la base dérivée devrait alors être publiée en open data. Un cache de fiches produits juxtaposé à un stock personnel est un cas limite ; pour un usage privé non redistribué, la question ne se pose pas en pratique. **Elle se poserait si Chaudron devenait un service multi-utilisateurs public.** À trancher avant, pas après.
 
 **User-Agent obligatoire.** *« We ask you to always use a custom User-Agent to identify your app »*, au format `AppName/Version (ContactEmail)` **[V]**. Les lectures ne demandent **aucune autre authentification** ; les écritures (édition de fiche, upload de photo) exigent un compte.
 
@@ -297,7 +297,7 @@ Mesuré en direct le 3 août 2026 via `GET /api/v2/search` **[V]** :
 
 ### 3.4 Alternatives et compléments
 
-| Source | Modèle | Verdict pour Pantry |
+| Source | Modèle | Verdict pour Chaudron |
 |---|---|---|
 | **CodeOnline Food (GS1 France)** | Base alimentée **par les marques elles-mêmes**, donc données fiables et à jour, spécifiquement France. API « CodeOnline Search ». **Accès réservé aux adhérents GS1 France** ; la grille tarifaire cite un forfait PREMIUM à **20 000 € HT/an** **[S]** (<https://developers.gs1.fr/tarifs>) | **Hors de portée.** C'est pourtant *le* plan B qualitativement supérieur si le projet devenait commercial. |
 | **Edamam Food Database** | Freemium, jusqu'à ~999 $/mois ; ~700 000 codes UPC/EAN **[S, non vérifié à la source]** | Base à dominante américaine, couverture FR douteuse. |
@@ -312,7 +312,7 @@ Mesuré en direct le 3 août 2026 via `GET /api/v2/search` **[V]** :
 
 **Le point d'architecture le plus important de la section.**
 
-La doc OFF précise : *« If your requests come from your users directly (ex: mobile app), the rate limits apply per user »* **[V]**. Corollaire, souvent manqué : **en centralisant les appels dans le backend FastAPI, toutes les requêtes sortent d'une IP unique — la limite de 15 req/min devient un plafond global, partagé par l'ensemble des utilisateurs de Pantry.**
+La doc OFF précise : *« If your requests come from your users directly (ex: mobile app), the rate limits apply per user »* **[V]**. Corollaire, souvent manqué : **en centralisant les appels dans le backend FastAPI, toutes les requêtes sortent d'une IP unique — la limite de 15 req/min devient un plafond global, partagé par l'ensemble des utilisateurs de Chaudron.**
 
 Ce n'est pas une raison pour appeler OFF depuis le navigateur (on perdrait le cache, la maîtrise du User-Agent et la résilience hors ligne). C'est une raison pour que **le backend ne soit presque jamais amené à appeler OFF**.
 
@@ -324,7 +324,7 @@ La doc OFF le dit d'ailleurs elle-même : *« If you expect your app to generate
 2. **Cache positif quasi permanent.** Une fiche produit ne change presque jamais. TTL long (30 jours), servi en **stale-while-revalidate** : on rend immédiatement la version en cache, on rafraîchit en tâche de fond. Le scan ne doit *jamais* attendre le réseau.
 3. **Cache négatif court.** Un 404 doit être mémorisé — sinon chaque re-scan d'un produit absent retape OFF — mais avec un TTL court (24 h) car un produit peut être ajouté à OFF entre-temps, y compris par l'utilisateur lui-même.
 4. **Un seul point de sortie, avec limiteur.** Toutes les requêtes OFF passent par un client unique portant :
-   - le User-Agent conforme (`Pantry/x.y (contact@…)`) ;
+   - le User-Agent conforme (`Chaudron/x.y (contact@…)`) ;
    - un limiteur à **10 req/min** (marge sous les 15) ;
    - un backoff exponentiel sur 429/503, et une tolérance aux réponses **HTML** (voir §3.2) ;
    - un timeout court (2–3 s) : OFF est une infrastructure associative, pas un CDN.
@@ -346,7 +346,7 @@ Cette séparation n'est pas une entorse à l'ADR : elle en respecte l'esprit (to
 
 **b) Le plafond de 15 req/min devient un mur en phase 2.** En mono-foyer, un cache correct suffit. En service public multi-utilisateurs, 15 requêtes produit par minute partagées entre *tous* les foyers, depuis l'IP unique du backend, ne tient pas — et le dépassement expose à un bannissement d'IP qui couperait le service pour tout le monde d'un coup. **L'import du dump JSONL n'est donc pas une optimisation de confort mais un prérequis de la phase 2**, à traiter comme tel dans la feuille de route.
 
-**c) Le share-alike ODbL se réveille en phase 2.** Tant que Pantry sert un foyer, la question de la redistribution est théorique. Un service public qui combine OFF avec d'autres sources de données produit entre dans le périmètre du share-alike (§3.2). À trancher **avant** l'ouverture, pas après.
+**c) Le share-alike ODbL se réveille en phase 2.** Tant que Chaudron sert un foyer, la question de la redistribution est théorique. Un service public qui combine OFF avec d'autres sources de données produit entre dans le périmètre du share-alike (§3.2). À trancher **avant** l'ouverture, pas après.
 
 ---
 
@@ -439,7 +439,7 @@ Infrastructure associative. Pannes, maintenances, rate limit atteint, **et répo
 
 4. **Offline-first, sans Background Sync.** Non supporté par Safari. File d'attente en IndexedDB, vidée sur `online` / `visibilitychange` / démarrage. Le scan et le décodage doivent fonctionner en avion ; seule la résolution EAN → fiche exige le réseau, et elle est asynchrone par conception.
 
-5. **Open Food Facts en v3 (v3.6) uniquement.** v2 est officiellement dépréciée. Toujours `fields=` pour ne demander que le nécessaire. User-Agent `Pantry/x.y (contact@…)` obligatoire. Développement contre le staging `world.openfoodfacts.net` (Basic Auth `off`/`off`). Remplir le formulaire de déclaration d'usage de l'API.
+5. **Open Food Facts en v3 (v3.6) uniquement.** v2 est officiellement dépréciée. Toujours `fields=` pour ne demander que le nécessaire. User-Agent `Chaudron/x.y (contact@…)` obligatoire. Développement contre le staging `world.openfoodfacts.net` (Basic Auth `off`/`off`). Remplir le formulaire de déclaration d'usage de l'API.
 
 6. **Le rate limit est un plafond global, pas par utilisateur.** 15 req/min pour une IP unique : en centralisant dans FastAPI, c'est la limite de **toute** l'application. Donc : cache Postgres avec TTL long en stale-while-revalidate, cache négatif court (24 h) sur les 404, un seul client sortant avec limiteur à 10 req/min et backoff, tolérance aux réponses HTML. **À terme, pré-remplir la base par le dump JSONL « France » + deltas quotidiens** — OFF le recommande explicitement. Concevoir la table dès la v1 pour accepter les deux voies d'alimentation.
 

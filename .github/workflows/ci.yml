@@ -97,22 +97,22 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: pantry
-          POSTGRES_PASSWORD: pantry
-          POSTGRES_DB: pantry_test
+          POSTGRES_USER: chaudron
+          POSTGRES_PASSWORD: chaudron
+          POSTGRES_DB: chaudron_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U pantry -d pantry_test"
+          --health-cmd "pg_isready -U chaudron -d chaudron_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
       # Test credentials only: this database exists for the length of the job.
-      PANTRY_ENV: ci
-      PANTRY_LOG_LEVEL: WARNING
-      PANTRY_DATABASE_URL: postgresql+asyncpg://pantry:pantry@localhost:5432/pantry_test
-      PANTRY_SECRET_KEY: ci-only-not-a-real-secret
+      CHAUDRON_ENV: ci
+      CHAUDRON_LOG_LEVEL: WARNING
+      CHAUDRON_DATABASE_URL: postgresql+asyncpg://chaudron:chaudron@localhost:5432/chaudron_test
+      CHAUDRON_SECRET_KEY: ci-only-not-a-real-secret
     steps:
       - uses: actions/checkout@v5
 
@@ -158,13 +158,13 @@ jobs:
           podman build \
             --format docker \
             --file backend/Containerfile \
-            --tag "localhost/pantry-api:${GITHUB_SHA::12}" \
+            --tag "localhost/chaudron-api:${GITHUB_SHA::12}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             backend
 
       - name: Inspect image
-        run: podman image inspect "localhost/pantry-api:${GITHUB_SHA::12}" --format '{{ .Id }} {{ .Config.User }}'
+        run: podman image inspect "localhost/chaudron-api:${GITHUB_SHA::12}" --format '{{ .Id }} {{ .Config.User }}'
 
   # ---------------------------------------------------------------------------
   # 5. Security — dependency vulnerabilities and leaked secrets

@@ -1,23 +1,23 @@
-# Quadlet unit for the Pantry API (rootless).
+# Quadlet unit for the Chaudron API (rootless).
 #
-# Install to:   ~/.config/containers/systemd/pantry.container
+# Install to:   ~/.config/containers/systemd/chaudron.container
 # Reload with:  systemctl --user daemon-reload
-# Start with:   systemctl --user start pantry.service
+# Start with:   systemctl --user start chaudron.service
 #
-# Generated unit name is derived from the filename: pantry.service.
+# Generated unit name is derived from the filename: chaudron.service.
 
 [Unit]
-Description=Pantry — API
-Documentation=https://github.com/ClaraVnk/pantry
+Description=Chaudron — API
+Documentation=https://github.com/ClaraVnk/chaudron
 # Ordering only. Quadlet turns `Requires=` into a hard dependency; the API is
 # written to survive a database restart, so `Wants=` keeps a DB blip from
 # cascading into an API outage.
-After=pantry-db.service
-Wants=pantry-db.service
+After=chaudron-db.service
+Wants=chaudron-db.service
 
 [Container]
-ContainerName=pantry
-Image=ghcr.io/claravnk/pantry:latest
+ContainerName=chaudron
+Image=ghcr.io/claravnk/chaudron:latest
 
 # Continuous deployment. `podman-auto-update.timer` (overridden to every 15
 # minutes, see ops/README.md) compares the local digest against the registry and
@@ -29,8 +29,8 @@ Image=ghcr.io/claravnk/pantry:latest
 # starts cleanly, answers /healthz, and is functionally wrong still ships.
 AutoUpdate=registry
 
-# Same user-defined network as the database: podman network create pantry-net
-Network=pantry-net
+# Same user-defined network as the database: podman network create chaudron-net
+Network=chaudron-net
 
 # Bound to loopback: TLS termination and public exposure belong to the
 # reverse proxy, not to this container.
@@ -38,7 +38,7 @@ PublishPort=127.0.0.1:8000:8000
 
 # Non-secret 12-factor configuration. Copy .env.example, fill it in, and keep
 # it out of git. Secrets below override anything set here.
-EnvironmentFile=%h/pantry/pantry.env
+EnvironmentFile=%h/chaudron/chaudron.env
 
 # Secrets injected as environment variables by Podman. Nothing secret may live
 # in the EnvironmentFile above: that file sits in $HOME next to the backups, so
@@ -50,34 +50,34 @@ EnvironmentFile=%h/pantry/pantry.env
 #
 #   printf '%s' "$VALUE" | podman secret create <name> -
 #
-# PANTRY_CREDENTIAL_ENCRYPTION_KEY is the most sensitive value in the system: it
+# CHAUDRON_CREDENTIAL_ENCRYPTION_KEY is the most sensitive value in the system: it
 # decrypts every provider API key the households have entrusted to this
 # instance. Generate with `openssl rand -base64 32`. Rotating it invalidates all
 # stored household credentials — see docs/security-model.md.
-Secret=pantry-credential-encryption-key,type=env,target=PANTRY_CREDENTIAL_ENCRYPTION_KEY
+Secret=chaudron-credential-encryption-key,type=env,target=CHAUDRON_CREDENTIAL_ENCRYPTION_KEY
 
 # Database DSN — carries the password, so it is a secret, not configuration.
-Secret=pantry-database-url,type=env,target=PANTRY_DATABASE_URL
+Secret=chaudron-database-url,type=env,target=CHAUDRON_DATABASE_URL
 
 # Session and token signing.
-Secret=pantry-secret-key,type=env,target=PANTRY_SECRET_KEY
+Secret=chaudron-secret-key,type=env,target=CHAUDRON_SECRET_KEY
 
 # Inbound-email webhook signature key. Without it, anyone can inject purchases
 # into any household.
-Secret=pantry-inbound-email-key,type=env,target=PANTRY_INBOUND_EMAIL_WEBHOOK_KEY
+Secret=chaudron-inbound-email-key,type=env,target=CHAUDRON_INBOUND_EMAIL_WEBHOOK_KEY
 
 # Provider keys for `instance_owner` mode ONLY — used by the operator's own
 # household, never shared with other households (see ADR-0007). Create only the
 # ones you actually use; a missing secret is a start-up failure, so comment out
 # the lines you do not need.
-Secret=pantry-anthropic-api-key,type=env,target=ANTHROPIC_API_KEY
-#Secret=pantry-openai-api-key,type=env,target=OPENAI_API_KEY
-#Secret=pantry-gemini-api-key,type=env,target=GEMINI_API_KEY
-#Secret=pantry-mistral-api-key,type=env,target=MISTRAL_API_KEY
+Secret=chaudron-anthropic-api-key,type=env,target=ANTHROPIC_API_KEY
+#Secret=chaudron-openai-api-key,type=env,target=OPENAI_API_KEY
+#Secret=chaudron-gemini-api-key,type=env,target=GEMINI_API_KEY
+#Secret=chaudron-mistral-api-key,type=env,target=MISTRAL_API_KEY
 
 # Uploaded receipt images awaiting OCR. `:Z` is mandatory under SELinux
 # Enforcing; this directory is private to the API container.
-Volume=%h/pantry/data/uploads:/var/lib/pantry/uploads:Z
+Volume=%h/chaudron/data/uploads:/var/lib/chaudron/uploads:Z
 
 # Liveness probe. /healthz answers without touching PostgreSQL, so a database
 # outage does not restart the API. Readiness (/readyz, which does check the

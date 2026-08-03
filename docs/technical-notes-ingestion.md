@@ -1,6 +1,6 @@
 # Note technique — Ingestion automatique du stock et export de la liste de courses
 
-**Projet** : Pantry (PWA de gestion de stock alimentaire domestique — backend FastAPI / PostgreSQL)
+**Projet** : Chaudron (PWA de gestion de stock alimentaire domestique — backend FastAPI / PostgreSQL)
 **Statut** : note de faisabilité, pour décision
 **Date de rédaction** : 3 août 2026
 **Toutes les pages citées ont été consultées le 3 août 2026.** Les tarifs, quotas et politiques évoluent vite : les chiffres ci-dessous ont une durée de validité de quelques mois, pas d'années.
@@ -148,7 +148,7 @@ Structures vérifiées **dans le code source** (<https://raw.githubusercontent.c
 
 ⚠️ **La documentation web de Stalwart est une SPA non extractible** (`stalw.art/docs/` ne renvoie qu'un lien vers l'installation ; une douzaine d'URL plausibles pour les MTA Hooks renvoient 404). **Les éléments ci-dessus proviennent du code source et du CHANGELOG, pas d'une page de doc lisible.** À revérifier dans un navigateur avant implémentation.
 
-⚠️ **Licence AGPL-3.0** : sans effet si on héberge pour soi ; si Pantry devient un service accessible à des tiers, l'AGPL §13 s'applique. Arbitrage à faire consciemment.
+⚠️ **Licence AGPL-3.0** : sans effet si on héberge pour soi ; si Chaudron devient un service accessible à des tiers, l'AGPL §13 s'applique. Arbitrage à faire consciemment.
 
 #### Postal — l'alternative MIT
 
@@ -183,7 +183,7 @@ Format `processed` : `rcpt_to`, `mail_from`, `subject`, `message_id`, **`spam_st
 - ⚠️ **Le 29 juin 2026, la Cour suprême des États-Unis a rendu l'arrêt *Trump v. Slaughter* (n° 25-332, 6-3)** : les restrictions empêchant le président de révoquer les commissaires de la FTC sont inconstitutionnelles. **L'indépendance de la FTC — l'un des piliers de l'adéquation — n'est plus garantie**, et le PCLOB fait face à la même objection. noyb demande une sortie immédiate du DPF. La recommandation des cabinets est de mettre à jour les *Transfer Impact Assessments* et d'« *evaluate whether EU-based or otherwise lower-risk alternatives are economically and technically viable* ».
   Source : <https://www.activemind.legal/guides/dpf-supreme-court/> (publié le 2 juillet 2026)
 
-**Traduction pour Pantry** : des données de courses alimentaires nominatives, par foyer, sont des données personnelles révélatrices d'habitudes de vie (régime, allergies, convictions religieuses déductibles). Bâtir sur un fournisseur US en 2026 expose à une migration dans l'urgence si le pourvoi aboutit. Ce n'est pas un risque théorique cette année.
+**Traduction pour Chaudron** : des données de courses alimentaires nominatives, par foyer, sont des données personnelles révélatrices d'habitudes de vie (régime, allergies, convictions religieuses déductibles). Bâtir sur un fournisseur US en 2026 expose à une migration dans l'urgence si le pourvoi aboutit. Ce n'est pas un risque théorique cette année.
 
 À noter également : traiter les mails d'une boîte, c'est traiter les données de **tiers qui n'ont jamais consenti**. Il faut recommander à l'utilisateur un **filtre de transfert sélectif** (expéditeur = enseigne), ne persister que les lignes extraites, et purger les emails bruts.
 
@@ -221,7 +221,7 @@ Source : <https://developers.google.com/workspace/add-ons/concepts/workspace-sco
 Google exige que l'app appartienne à un type approuvé pour les scopes Gmail. Le n°4 est « *Applications that use information from emails to provide reporting or monitoring services for the benefit of users that **improve the email experience** (such as applications that automate travel itineraries or track flights or package delivery statuses)* ».
 Source : <https://developers.google.com/workspace/workspace-api-user-data-developer-policy>
 
-Pantry ressemble à ce pattern (extraction de récap depuis un mail), mais **une app de garde-manger améliore la gestion de stock, pas l'expérience email**. **C'est un risque de rejet réel, à l'appréciation de l'équipe Trust & Safety, et non chiffrable.**
+Chaudron ressemble à ce pattern (extraction de récap depuis un mail), mais **une app de garde-manger améliore la gestion de stock, pas l'expérience email**. **C'est un risque de rejet réel, à l'appréciation de l'équipe Trust & Safety, et non chiffrable.**
 
 #### Vérification OAuth
 
@@ -316,7 +316,7 @@ Source : <https://www.cnil.fr/fr/mots-de-passe-une-nouvelle-recommandation-pour-
 
 ### 2.4 Conclusion tranchée
 
-**Non, la lecture directe ne vaut pas le coup pour Pantry.**
+**Non, la lecture directe ne vaut pas le coup pour Chaudron.**
 
 L'arithmétique est brutale : 6 semaines de vérification, une homepage et un domaine vérifié en Search Console, une vidéo de démo en anglais, la nécessité de convaincre Google qu'une app de garde-manger « améliore l'expérience email », et **675 $ minimum tous les ans à perpétuité** pour un audit complet à chaque renouvellement — pour un projet sans revenu. Le self-scan gratuit qui rendait ça supportable n'existe plus.
 
@@ -330,7 +330,7 @@ L'arithmétique est brutale : 6 semaines de vérification, une homepage et un do
 
 ### 3.1 Coût — ce n'est pas le critère de décision, mais c'est le foyer qui paie
 
-⚠️ **Cadrage imposé par les ADR-0005 et 0007** : Pantry ne choisit pas un modèle, il expose cinq adaptateurs et **chaque foyer configure le sien** (BYOK, Ollama local, ou la clé du propriétaire d'instance). Les chiffres ci-dessous ne servent donc **pas** à arbitrer une dépense d'exploitation — il n'y en a pas — mais à deux choses : (a) recommander un **défaut honnête** dans l'interface de sélection, puisque l'ADR-0007 note que « quatre fournisseurs à choisir, c'est aussi une charge de décision » ; (b) donner à l'utilisateur un ordre de grandeur de ce que son propre scan lui coûtera. Les repères sont donnés sur Claude parce que `claude-opus-5` est le défaut documenté de l'ADR-0005 ; ils se transposent aux autres adaptateurs.
+⚠️ **Cadrage imposé par les ADR-0005 et 0007** : Chaudron ne choisit pas un modèle, il expose cinq adaptateurs et **chaque foyer configure le sien** (BYOK, Ollama local, ou la clé du propriétaire d'instance). Les chiffres ci-dessous ne servent donc **pas** à arbitrer une dépense d'exploitation — il n'y en a pas — mais à deux choses : (a) recommander un **défaut honnête** dans l'interface de sélection, puisque l'ADR-0007 note que « quatre fournisseurs à choisir, c'est aussi une charge de décision » ; (b) donner à l'utilisateur un ordre de grandeur de ce que son propre scan lui coûtera. Les repères sont donnés sur Claude parce que `claude-opus-5` est le défaut documenté de l'ADR-0005 ; ils se transposent aux autres adaptateurs.
 
 **Comptage des tokens d'image chez Claude** : l'image est découpée en **patches de 28×28 px**, soit `⌈largeur/28⌉ × ⌈hauteur/28⌉` tokens visuels, avec double plafond (bord long **2576 px** et **4784 tokens** sur les modèles haute résolution ; **1568 px / 1568 tokens** sur palier standard comme Haiku 4.5). Au-delà, redimensionnement automatique.
 Source : <https://platform.claude.com/docs/en/build-with-claude/vision>
@@ -449,7 +449,7 @@ Source : <https://arxiv.org/html/2606.13108> (Table 7)
 
 Explication mécaniste des auteurs : les VLM « *ont tendance à corriger ce qu'ils perçoivent comme des fautes d'orthographe ou de grammaire dans l'image source, produisant un texte linguistiquement plausible mais factuellement incohérent avec l'entrée visuelle* », là où l'OCR spécialisé « *reproduit fidèlement le contenu exact — y compris les fautes délibérées — sans injecter de a priori linguistique* ».
 
-**Traduction pour Pantry : un VLM face à « CRQ MONSIEUR X4 » subit une pression statistique à écrire « CROQUE MONSIEUR X4 ». Face à un chiffre partiellement effacé, il subit la même pression à produire le chiffre vraisemblable. C'est la même propriété qui nous fait gagner sur l'expansion des abréviations et perdre sur les montants. On ne peut pas avoir l'une sans l'autre.** D'où l'architecture hybride en §3.7.
+**Traduction pour Chaudron : un VLM face à « CRQ MONSIEUR X4 » subit une pression statistique à écrire « CROQUE MONSIEUR X4 ». Face à un chiffre partiellement effacé, il subit la même pression à produire le chiffre vraisemblable. C'est la même propriété qui nous fait gagner sur l'expansion des abréviations et perdre sur les montants. On ne peut pas avoir l'une sans l'autre.** D'où l'architecture hybride en §3.7.
 
 **Contrepoint honnête** : sur les documents dégradés, les VLM restent nettement meilleurs que les moteurs classiques — CER 3 à 4× inférieur sur scans bruités et tickets ; sur factures scannées, Gemini 2.5 Pro 94 % et Claude 3.5 Sonnet 90 % contre AWS Textract 82 % et Tesseract 80–85 %.
 ⚠️ Chiffres agrégés de sources tierces par <https://parsli.co/blog/llm-ocr-vs-traditional-ocr>, non mesurés par eux, sur des modèles d'une génération en arrière.
@@ -547,7 +547,7 @@ Sources : <https://world.openfoodfacts.org/data> · <https://www.data.gouv.fr/da
 
 Source : <https://world.openfoodfacts.org/terms-of-use>
 
-La distinction qui décide de tout : **notre copie locale enrichie est une *Derivative Database*** (la stocker n'oblige à rien tant qu'on ne la distribue pas publiquement ; dès qu'on la publie, elle repart sous ODbL, enrichissements inclus), tandis que **notre PWA, nos écrans et nos exports sont un *Produced Work*** — **l'ODbL ne contamine pas le code de Pantry**, seule la **notice d'attribution** avec lien vers openfoodfacts.org est due dès qu'il y a diffusion publique. Les marques et le droit à l'image sur les emballages ne sont **pas** concédés par OFF.
+La distinction qui décide de tout : **notre copie locale enrichie est une *Derivative Database*** (la stocker n'oblige à rien tant qu'on ne la distribue pas publiquement ; dès qu'on la publie, elle repart sous ODbL, enrichissements inclus), tandis que **notre PWA, nos écrans et nos exports sont un *Produced Work*** — **l'ODbL ne contamine pas le code de Chaudron**, seule la **notice d'attribution** avec lien vers openfoodfacts.org est due dès qu'il y a diffusion publique. Les marques et le droit à l'image sur les emballages ne sont **pas** concédés par OFF.
 
 → **Conseil d'architecture juridique : garder la table d'alias apprises dans une table séparée référençant les codes-barres, plutôt qu'en colonnes ajoutées à la copie OFF.** Ça garde la frontière ODbL lisible si le service s'ouvre un jour.
 
@@ -589,7 +589,7 @@ CREATE INDEX idx_produits_nom_trgm
 
 **FTS française** : configuration `french` standard, à combiner avec unaccent comme dictionnaire *filtrant* (avant le stemmer). `websearch_to_tsquery` est le seul parser qui **ne lève jamais d'erreur de syntaxe** → le seul sûr sur une entrée brute. `ts_rank_cd` (cover density, tient compte de la proximité) plutôt que `ts_rank`. **PostgreSQL 18 n'apporte aucune nouveauté FTS et toujours pas de BM25 en core.**
 
-**BM25** : `pg_search` de ParadeDB (v0.25.0 du 28/07/2026, 9,1 k ★, releases hebdomadaires, PG 15+) est mature — ⚠️ **mais AGPL-3.0** : sans effet en auto-hébergement pur, l'§13 s'applique si Pantry devient un service accessible à des tiers. **Arbitrage à faire consciemment, pas à découvrir plus tard.**
+**BM25** : `pg_search` de ParadeDB (v0.25.0 du 28/07/2026, 9,1 k ★, releases hebdomadaires, PG 15+) est mature — ⚠️ **mais AGPL-3.0** : sans effet en auto-hébergement pur, l'§13 s'applique si Chaudron devient un service accessible à des tiers. **Arbitrage à faire consciemment, pas à découvrir plus tard.**
 
 **`pgvector` — épingler ≥ 0.8.6** (publiée le 29 juillet 2026). Historique récent : **six correctifs en cinq mois, dont une corruption d'index HNSW au vacuum (0.8.3) et deux buffer overflows**. Ce n'est pas un motif de rejet (le projet corrige vite et publiquement), mais ne pas rester sur une 0.8.x antérieure.
 Source : <https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md>
@@ -874,7 +874,7 @@ Contournement fiable, le « truc Notes » : coller dans **Notes** → convertir 
 | **Absence de logprobs chez Anthropic** | API Claude | Aucun signal de confiance natif : coût structurel à budgéter dès la conception |
 | **10 recherches/min chez Open Food Facts** | API en ligne | ≈ 1 ticket/minute → dump local obligatoire |
 | **Lexique d'abréviations d'enseignes FR** | N'existe nulle part | Coût de démarrage entièrement à notre charge (et notre seul actif défendable) |
-| **AGPL** | Stalwart, ParadeDB `pg_search` | S'applique si Pantry devient un service tiers |
+| **AGPL** | Stalwart, ParadeDB `pg_search` | S'applique si Chaudron devient un service tiers |
 | **Abonnement Tasks.org** | Connecteur CalDAV sur Android | Friction utilisateur réelle |
 | **Papier thermique** | Physique | Ticket illisible en **7 à 30 jours** ; le portefeuille PVC accélère la destruction |
 
@@ -949,4 +949,4 @@ Contournement fiable, le « truc Notes » : coller dans **Notes** → convertir 
 
 15. **Acter ces choix dans trois ADR** une fois les cinq vérifications de la §6 faites : *réception d'e-mail entrant auto-hébergée* (Stalwart vs Postal vs managé, avec l'arbitrage AGPL), *export de la liste de courses* (Web Share puis CalDAV), et un **amendement à l'ADR-0008** sur l'avancement du dump local en phase 1. La décision n°5 (ne pas implémenter la Gmail API) mérite d'être consignée elle aussi : c'est une non-décision coûteuse à réexaminer tous les six mois si elle n'est pas écrite.
 
-16. **Rediscuter tout choix de fournisseur américain si le pourvoi Latombe aboutit.** L'arrêt *Trump v. Slaughter* du 29 juin 2026 a fragilisé l'indépendance de la FTC, l'un des piliers de l'adéquation DPF. Les recommandations n°2 (auto-hébergement) et n°8 (dump local) mettent Pantry à l'abri de ce risque par construction — c'est un argument de plus en leur faveur.
+16. **Rediscuter tout choix de fournisseur américain si le pourvoi Latombe aboutit.** L'arrêt *Trump v. Slaughter* du 29 juin 2026 a fragilisé l'indépendance de la FTC, l'un des piliers de l'adéquation DPF. Les recommandations n°2 (auto-hébergement) et n°8 (dump local) mettent Chaudron à l'abri de ce risque par construction — c'est un argument de plus en leur faveur.

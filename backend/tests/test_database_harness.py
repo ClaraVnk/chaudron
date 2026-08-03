@@ -14,7 +14,7 @@ from __future__ import annotations
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pantry.domain.models import Household
+from chaudron.domain.models import Household
 from tests.conftest import TenantPair
 
 

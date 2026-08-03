@@ -1,4 +1,4 @@
-# Pantry — revue de sécurité du baseline
+# Chaudron — revue de sécurité du baseline
 
 > Audit de l'existant au **3 août 2026**, avant la première publication du dépôt.
 > Rédigé en français ; les identifiants cités (fichiers, colonnes, variables) sont
@@ -72,11 +72,11 @@ caractères et plus.
 | Fichier:ligne | Valeur | Verdict |
 |---|---|---|
 | `.env.example:20` | `postgresql+asyncpg://user:password@host:5432/dbname` | **Gabarit.** Littéralement `user` et `password`. |
-| `CONTRIBUTING.md:130` | `postgresql+asyncpg://pantry:<password>@127.0.0.1:5432/pantry` | **Gabarit.** Le mot de passe est un chevron à remplacer. |
-| `.github/workflows/ci.yml:111` | `postgresql+asyncpg://pantry:pantry@localhost:5432/pantry_test` | **Identifiants d'un service conteneurisé éphémère**, créé et détruit dans le job. Aucune valeur hors CI. Voir SEC-025. |
-| `.github/workflows/ci.yml:112` | `PANTRY_SECRET_KEY: ci-only-not-a-real-secret` | **Valeur auto-documentée**, sans entropie. Correcte. |
-| `.env.example:61` | `PANTRY_LLM_DEFAULT_MODEL=claude-opus-5` | **Nom de modèle**, pas un secret. Voir SEC-027. |
-| `.env.example:89` | `PANTRY_OFF_BASE_URL=https://world.openfoodfacts.org` | URL publique. |
+| `CONTRIBUTING.md:130` | `postgresql+asyncpg://chaudron:<password>@127.0.0.1:5432/chaudron` | **Gabarit.** Le mot de passe est un chevron à remplacer. |
+| `.github/workflows/ci.yml:111` | `postgresql+asyncpg://chaudron:chaudron@localhost:5432/chaudron_test` | **Identifiants d'un service conteneurisé éphémère**, créé et détruit dans le job. Aucune valeur hors CI. Voir SEC-025. |
+| `.github/workflows/ci.yml:112` | `CHAUDRON_SECRET_KEY: ci-only-not-a-real-secret` | **Valeur auto-documentée**, sans entropie. Correcte. |
+| `.env.example:61` | `CHAUDRON_LLM_DEFAULT_MODEL=claude-opus-5` | **Nom de modèle**, pas un secret. Voir SEC-027. |
+| `.env.example:89` | `CHAUDRON_OFF_BASE_URL=https://world.openfoodfacts.org` | URL publique. |
 
 ### 2.5 Vérifications complémentaires
 
@@ -112,7 +112,7 @@ est bloquée par les constats de la §3 ci-dessous.
 **Sévérité :** Critique
 **Fichiers :** `docs/adr/0006-multi-tenant-from-day-one.md:41,49,54` ·
 `docs/data-model.md:816-862` (§5.2, §5.3) ·
-`backend/src/pantry/domain/models.py:245-256` (`HouseholdScopedMixin`), `:847-851`
+`backend/src/chaudron/domain/models.py:245-256` (`HouseholdScopedMixin`), `:847-851`
 (`ix_receipt_pending`), `:416-418` (`product.household_id` nullable) ·
 `CONTRIBUTING.md:373-377`
 
@@ -160,7 +160,7 @@ précédent. Ce raisonnement est juste **en présence d'un pooler externe**
 asynchrone + `asyncpg`, avec un pool **en processus** qui réserve une connexion
 pour la durée de la transaction ; `SET LOCAL` est réinitialisé par PostgreSQL
 lui-même au `COMMIT`/`ROLLBACK`. Le mode d'échec redouté suppose soit un `SET` de
-session au lieu d'un `SET LOCAL`, soit un composant que Pantry n'a pas choisi.
+session au lieu d'un `SET LOCAL`, soit un composant que Chaudron n'a pas choisi.
 **Le coût invoqué est celui d'une architecture qui n'est pas la sienne.**
 
 **Impact concret.** Un utilisateur légitime d'un autre foyer lit l'inventaire
@@ -171,7 +171,7 @@ indiquera précisément où chercher.
 
 **Correction.** **Exiger le RLS dès la v1**, dans la première migration Alembic :
 
-1. Rôle applicatif `pantry_app`, **non propriétaire** des tables, plus
+1. Rôle applicatif `chaudron_app`, **non propriétaire** des tables, plus
    `ALTER TABLE … FORCE ROW LEVEL SECURITY` sur chaque table portant un
    `household_id` (sans `FORCE`, le propriétaire contourne les politiques).
 2. `SET LOCAL app.household_id = …` émis par **un point unique** — la fabrique de
@@ -181,7 +181,7 @@ indiquera précisément où chercher.
    `household_id = current_setting('app.household_id', true)::uuid`. Un
    `current_setting` absent doit faire **échouer** la requête, pas la laisser
    passer.
-4. Rôle `pantry_worker` distinct pour la file transverse : une vue ou une
+4. Rôle `chaudron_worker` distinct pour la file transverse : une vue ou une
    fonction `SECURITY DEFINER` n'exposant que `(id, household_id)` des tickets en
    attente ; le traitement réel n'a lieu qu'après avoir posé le tenant.
    `ix_receipt_pending` reste transverse mais ne donne plus accès aux données.
@@ -209,20 +209,20 @@ appliqué à sa propre conclusion.
 #### SEC-002 — La clé de chiffrement des credentials n'est provisionnée par aucun secret Podman
 
 **Sévérité :** Élevée
-**Fichiers :** `ops/pantry.container:32,40-42` · `ops/README.md:160-190` ·
+**Fichiers :** `ops/chaudron.container:32,40-42` · `ops/README.md:160-190` ·
 `.env.example:38-58` · `docs/adr/0007-byok-and-local-inference.md:42` ·
 `docs/data-model.md:1111-1116`
 
-**Description.** `PANTRY_CREDENTIAL_ENCRYPTION_KEY` est déclarée **requise**
+**Description.** `CHAUDRON_CREDENTIAL_ENCRYPTION_KEY` est déclarée **requise**
 (`.env.example:44`) et l'ADR-0007 comme le modèle de données affirment qu'elle
 provient de l'environnement **via un secret Podman**, jamais de la base, pour
 qu'un dump volé ne contienne rien d'exploitable.
 
-Or le quadlet ne déclare que **trois** secrets — `PANTRY_SECRET_KEY`,
-`ANTHROPIC_API_KEY`, `PANTRY_INBOUND_EMAIL_WEBHOOK_KEY` (lignes 40-42) — et la
+Or le quadlet ne déclare que **trois** secrets — `CHAUDRON_SECRET_KEY`,
+`ANTHROPIC_API_KEY`, `CHAUDRON_INBOUND_EMAIL_WEBHOOK_KEY` (lignes 40-42) — et la
 procédure d'`ops/README.md:167-181` n'en crée que quatre, sans celle-ci.
 L'opérateur qui suit la documentation n'a qu'un endroit où la mettre :
-`EnvironmentFile=%h/pantry/pantry.env` (ligne 32), **un fichier en clair, dans le
+`EnvironmentFile=%h/chaudron/chaudron.env` (ligne 32), **un fichier en clair, dans le
 même répertoire personnel que les sauvegardes** produites par `ops/README.md:257`.
 
 Le contrôle décrit — « un dump volé ne suffit pas à déchiffrer » — repose
@@ -239,18 +239,18 @@ Anthropic était seul.
 1. Ajouter au quadlet, à la suite des lignes 40-42 :
 
    ```ini
-   Secret=pantry-credential-encryption-key,type=env,target=PANTRY_CREDENTIAL_ENCRYPTION_KEY
-   Secret=pantry-openai-api-key,type=env,target=OPENAI_API_KEY
-   Secret=pantry-gemini-api-key,type=env,target=GEMINI_API_KEY
-   Secret=pantry-mistral-api-key,type=env,target=MISTRAL_API_KEY
+   Secret=chaudron-credential-encryption-key,type=env,target=CHAUDRON_CREDENTIAL_ENCRYPTION_KEY
+   Secret=chaudron-openai-api-key,type=env,target=OPENAI_API_KEY
+   Secret=chaudron-gemini-api-key,type=env,target=GEMINI_API_KEY
+   Secret=chaudron-mistral-api-key,type=env,target=MISTRAL_API_KEY
    ```
 
 2. Ajouter la commande correspondante dans `ops/README.md` §2.3, au même format
    sûr que les autres (saisie masquée, stdin, `unset`), à exécuter **sur le
-   serveur, sous le compte `pantry`** :
+   serveur, sous le compte `chaudron`** :
 
    ```sh
-   read -rs -p 'Credential encryption key: ' V && printf '%s' "$V" | podman secret create pantry-credential-encryption-key - && unset V
+   read -rs -p 'Credential encryption key: ' V && printf '%s' "$V" | podman secret create chaudron-credential-encryption-key - && unset V
    ```
 
 3. Déplacer les quatre clés fournisseur hors de `.env.example` §« instance_owner »
@@ -265,7 +265,7 @@ Anthropic était seul.
 #### SEC-003 — Les colonnes d'erreur peuvent recevoir une clé d'API en clair et l'afficher
 
 **Sévérité :** Élevée
-**Fichiers :** `backend/src/pantry/domain/models.py:978` (`last_error`), `:831`
+**Fichiers :** `backend/src/chaudron/domain/models.py:978` (`last_error`), `:831`
 (`parse_error`), `:830` (`raw_response`) · `docs/data-model.md:731,764-765` ·
 `docs/adr/0007-byok-and-local-inference.md:44`
 
@@ -311,8 +311,8 @@ de menace avec une seule ligne de code.
 #### SEC-004 — Deux sources de vérité contradictoires pour l'autorisation `instance_owner`
 
 **Sévérité :** Élevée
-**Fichiers :** `.env.example:52` (`PANTRY_INSTANCE_OWNER_HOUSEHOLD_ID`) ·
-`backend/src/pantry/domain/models.py:273,280-285`
+**Fichiers :** `.env.example:52` (`CHAUDRON_INSTANCE_OWNER_HOUSEHOLD_ID`) ·
+`backend/src/chaudron/domain/models.py:273,280-285`
 (`household.is_instance_owner`, `uq_household_instance_owner`) ·
 `docs/adr/0007-byok-and-local-inference.md:29` · `docs/data-model.md:1193-1196`
 
@@ -321,7 +321,7 @@ l'argent de l'exploitant**. Deux mécanismes différents prétendent le décider
 
 - l'ADR-0007 : *« utilisable que par le foyer explicitement désigné comme
   propriétaire de l'instance (**variable d'environnement dédiée**) »* — d'où
-  `PANTRY_INSTANCE_OWNER_HOUSEHOLD_ID` ;
+  `CHAUDRON_INSTANCE_OWNER_HOUSEHOLD_ID` ;
 - le modèle de données : la colonne `household.is_instance_owner`, protégée par
   un index unique garantissant qu'il y en a **au plus un**.
 
@@ -335,7 +335,7 @@ inter-tables, donc non exprimable en `CHECK`, et repose sur le service seul.
 
 - Retenir `household.is_instance_owner` comme **seule** autorité — l'index unique
   est un vrai garde-fou, ce que l'environnement n'est pas.
-- Conserver `PANTRY_INSTANCE_OWNER_HOUSEHOLD_ID` uniquement comme **assertion de
+- Conserver `CHAUDRON_INSTANCE_OWNER_HOUSEHOLD_ID` uniquement comme **assertion de
   démarrage** : au boot, si la variable est renseignée et ne correspond pas au
   foyer marqué en base, **refuser de démarrer** (cohérent avec la règle
   fail-fast de `.env.example:3`). Si elle est vide, le mode est désactivé.
@@ -349,14 +349,14 @@ inter-tables, donc non exprimable en `CHECK`, et repose sur le service seul.
 
 **Sévérité :** Élevée
 **Fichiers :** `.env.example:93-101` · `docs/architecture.md:153-163` ·
-`SECURITY.md:124-130` · `backend/src/pantry/domain/models.py:264-286`
+`SECURITY.md:124-130` · `backend/src/chaudron/domain/models.py:264-286`
 (`Household`, sans colonne d'adresse entrante) · note de conception absente
 
 **Description.** C'est le seul endpoint conçu pour être appelé par un inconnu, et
 c'est la surface sensible la plus sous-spécifiée du dépôt. Quatre manques
 distincts :
 
-1. **Rejeu.** La signature est prévue (`PANTRY_INBOUND_EMAIL_WEBHOOK_KEY`), mais
+1. **Rejeu.** La signature est prévue (`CHAUDRON_INBOUND_EMAIL_WEBHOOK_KEY`), mais
    rien ne parle d'horodatage signé, de fenêtre de tolérance, ni de cache
    d'identifiants de message. Une signature valide capturée reste valide
    indéfiniment et peut être rejouée N fois.
@@ -381,7 +381,7 @@ distincts :
 1. Ajouter à `household` une colonne `inbound_email_token` : jeton aléatoire
    d'**au moins 128 bits**, unique, indexé, régénérable, nullable (le foyer qui
    n'utilise pas la fonction n'en a pas). L'adresse devient
-   `<token>@<PANTRY_INBOUND_EMAIL_DOMAIN>` et ne dérive **jamais** du nom du
+   `<token>@<CHAUDRON_INBOUND_EMAIL_DOMAIN>` et ne dérive **jamais** du nom du
    foyer ni d'un identifiant séquentiel.
 2. Spécifier la signature : HMAC-SHA-256 sur `timestamp + corps brut`,
    `hmac.compare_digest`, fenêtre de tolérance de 5 minutes, table de
@@ -448,7 +448,7 @@ resolve_and_validate(url) -> (ip, port, host_header)
   l'hôte : `169.254.0.0/16`, `::ffff:169.254.0.0/112`, `fd00:ec2::254`,
   `0.0.0.0/8`, `::/128` ;
 - `follow_redirects=False` posé explicitement sur le client `httpx` ;
-- borne de **taille** de réponse — ajouter `PANTRY_OLLAMA_MAX_RESPONSE_BYTES`, il
+- borne de **taille** de réponse — ajouter `CHAUDRON_OLLAMA_MAX_RESPONSE_BYTES`, il
   n'existe aujourd'hui qu'une borne de temps — et borne de profondeur du JSON
   désérialisé ;
 - jeu de tests contenant nommément chacune des notations ci-dessus.
@@ -462,20 +462,20 @@ resolve_and_validate(url) -> (ip, port, host_header)
 
 **Description.** Deux défauts distincts au même endroit.
 
-`PANTRY_JWT_ALGORITHM` est une **variable d'environnement**. Rendre l'algorithme
+`CHAUDRON_JWT_ALGORITHM` est une **variable d'environnement**. Rendre l'algorithme
 de vérification configurable est le point d'entrée classique de la confusion
 d'algorithme : `none`, ou une signature RSA vérifiée comme un HMAC avec la clé
 publique. L'algorithme d'une application est une propriété du code, pas de son
 déploiement — un opérateur n'a aucune raison légitime de le changer, et le rendre
 modifiable ne crée qu'un risque.
 
-`PANTRY_SECRET_KEY` est décrite comme servant *« to sign sessions and JWTs »* :
+`CHAUDRON_SECRET_KEY` est décrite comme servant *« to sign sessions and JWTs »* :
 un seul secret pour deux mécanismes. Sa fuite compromet les deux, et sa rotation
 invalide les deux.
 
 **Correction.**
 
-1. Retirer `PANTRY_JWT_ALGORITHM` de `.env.example`. Figer l'algorithme dans le
+1. Retirer `CHAUDRON_JWT_ALGORITHM` de `.env.example`. Figer l'algorithme dans le
    code, et **imposer une liste d'algorithmes acceptés** au décodage
    (`algorithms=["HS256"]`), jamais celui annoncé par le jeton.
 2. Séparer les secrets : soit deux variables, soit une clé maîtresse et deux
@@ -490,7 +490,7 @@ invalide les deux.
 #### SEC-008 — Aucune rétention n'est définie, et le `CASCADE` ne supprime pas les images
 
 **Sévérité :** Élevée
-**Fichiers :** `backend/src/pantry/domain/models.py:800` (`image_object_key`),
+**Fichiers :** `backend/src/chaudron/domain/models.py:800` (`image_object_key`),
 `:830` (`raw_response`), `:1080` (`stock_snapshot`), `:245-256` (`CASCADE`) ·
 `docs/data-model.md:1265-1267` (question 5) · `docs/architecture.md:223,249`
 
@@ -548,7 +548,7 @@ de débit décrite :
 - **webhook email** — endpoint public, amplification et saturation ;
 - **upload de ticket** — coût CPU, disque, et appel de modèle **facturé** ;
 - **génération de recette** — chaque appel coûte de l'argent au foyer, ou à
-  l'exploitant en mode `instance_owner`, où `PANTRY_LLM_MONTHLY_BUDGET_USD`
+  l'exploitant en mode `instance_owner`, où `CHAUDRON_LLM_MONTHLY_BUDGET_USD`
   n'est qu'un plafond **global** : atteint, il coupe la fonction pour tout le
   monde.
 
@@ -586,7 +586,7 @@ surcharge mais ne protège pas les autres foyers de la monopolisation du quota.
 **Description.** Le bloc de démarrage rapide contient `-p 5432:5432`, qui publie
 la base sur **toutes** les interfaces de l'hôte. C'est le bloc le plus copié-collé
 d'un dépôt public, et il contredit directement `ops/README.md:96`
-(`-p 127.0.0.1:8000:8000`) et `ops/pantry-db.container:26-28`, qui insiste à juste
+(`-p 127.0.0.1:8000:8000`) et `ops/chaudron-db.container:26-28`, qui insiste à juste
 titre : *« The database is never published to the host »*. Le mot de passe
 aléatoire (`openssl rand -hex 16`) limite le dommage sans supprimer l'exposition
 (scan, empreinte de version, vulnérabilités futures du démon).
@@ -625,7 +625,7 @@ proposera les montées de SHA en pull request plutôt que de les subir en silenc
 #### SEC-012 — Images de base épinglées par tag, et mise à jour automatique de la base de données depuis le registre
 
 **Sévérité :** Moyenne
-**Fichiers :** `backend/Containerfile:14,36` · `ops/pantry-db.container:19-20`
+**Fichiers :** `backend/Containerfile:14,36` · `ops/chaudron-db.container:19-20`
 
 **Description.** Deux écarts avec la discipline appliquée partout ailleurs dans
 le projet, où les dépendances Python sont épinglées **exactement** avec un
@@ -648,7 +648,7 @@ lockfile et `UV_FROZEN`.
    explicite. Confier le suivi à Dependabot (écosystème `docker`, qui gère les
    `Containerfile`).
 2. Remplacer `AutoUpdate=registry` par `AutoUpdate=local` sur
-   `pantry-db.container`, ou le retirer. Une montée de version de base de données
+   `chaudron-db.container`, ou le retirer. Une montée de version de base de données
    est une opération planifiée, précédée d'une sauvegarde vérifiée —
    `ops/README.md` §4 décrit déjà la bonne procédure.
 
@@ -657,26 +657,26 @@ lockfile et `UV_FROZEN`.
 #### SEC-013 — `.gitignore` n'exclut ni les sauvegardes, ni les clés, ni le fichier d'environnement de production
 
 **Sévérité :** Moyenne
-**Fichiers :** `.gitignore:14-21` · `ops/README.md:257` · `ops/pantry.container:32`
+**Fichiers :** `.gitignore:14-21` · `ops/README.md:257` · `ops/chaudron.container:32`
 
 **Description.** Trois manques, dont un directement induit par la documentation.
 
 1. **Aucun motif de sauvegarde.** `ops/README.md:257` propose
-   `pg_dump … > pantry-$(date -I).dump` **dans le répertoire courant**. Exécutée
+   `pg_dump … > chaudron-$(date -I).dump` **dans le répertoire courant**. Exécutée
    depuis le dépôt — ce qui est le réflexe naturel —, la commande dépose une
    copie complète de la base (A3, A4, A1 chiffrés) dans un répertoire de travail
    git non ignoré.
 2. **Aucun motif de matériel cryptographique** : `*.pem`, `*.key`, `*.p12`,
    `*.pfx`, `id_rsa*`.
-3. **`pantry.env` n'est pas couvert.** Les règles ignorent `.env` et `.env.*`,
-   mais le fichier d'environnement de production s'appelle `pantry.env`
-   (`ops/pantry.container:32`) et ne correspond à aucun motif.
+3. **`chaudron.env` n'est pas couvert.** Les règles ignorent `.env` et `.env.*`,
+   mais le fichier d'environnement de production s'appelle `chaudron.env`
+   (`ops/chaudron.container:32`) et ne correspond à aucun motif.
 
 **Correction.** Ajouter à la section « Secrets and local environment » :
 
 ```gitignore
 *.env
-pantry.env
+chaudron.env
 *.dump
 *.sql
 *.sql.gz
@@ -688,7 +688,7 @@ id_rsa*
 ```
 
 et modifier `ops/README.md:257` pour écrire la sauvegarde dans un répertoire
-dédié hors dépôt (`~/pantry/backups/`), avec un rappel sur son chiffrement et sa
+dédié hors dépôt (`~/chaudron/backups/`), avec un rappel sur son chiffrement et sa
 séparation d'avec la clé de chiffrement (voir SEC-002).
 
 ---
@@ -696,7 +696,7 @@ séparation d'avec la clé de chiffrement (voir SEC-002).
 #### SEC-014 — Le contenu Open Food Facts est stocké brut et rendu comme s'il était fiable
 
 **Sévérité :** Moyenne
-**Fichiers :** `backend/src/pantry/domain/models.py:419-438` (`gtin`, `name`,
+**Fichiers :** `backend/src/chaudron/domain/models.py:419-438` (`gtin`, `name`,
 `brand`, `category_tag`, `image_url`, `off_payload`) ·
 `docs/architecture.md:208-209`
 
@@ -734,8 +734,8 @@ accurate »*), mais côté **qualité**, pas côté **innocuité**.
 **Sévérité :** Moyenne
 **Fichier :** `.env.example:103-109`
 
-**Description.** `PANTRY_CORS_ORIGINS` est une liste explicite, ce qui est
-correct. Mais `PANTRY_CORS_ALLOW_CREDENTIALS` existe sans aucune contrainte
+**Description.** `CHAUDRON_CORS_ORIGINS` est une liste explicite, ce qui est
+correct. Mais `CHAUDRON_CORS_ALLOW_CREDENTIALS` existe sans aucune contrainte
 documentée. L'association `*` + `allow_credentials=True` est le défaut de
 configuration CORS le plus courant et le plus destructeur : n'importe quel site
 lit alors les réponses authentifiées de l'API.
@@ -743,8 +743,8 @@ lit alors les réponses authentifiées de l'API.
 **Correction.**
 
 1. Faire **échouer le démarrage** — et non produire un avertissement — si
-   `PANTRY_CORS_ORIGINS` contient `*` alors que
-   `PANTRY_CORS_ALLOW_CREDENTIALS=true`. C'est cohérent avec la règle fail-fast
+   `CHAUDRON_CORS_ORIGINS` contient `*` alors que
+   `CHAUDRON_CORS_ALLOW_CREDENTIALS=true`. C'est cohérent avec la règle fail-fast
    déjà annoncée en tête de `.env.example`.
 2. Ne **jamais** refléter l'en-tête `Origin` dans `Access-Control-Allow-Origin` :
    seule une valeur de la liste configurée est émise.
@@ -755,7 +755,7 @@ lit alors les réponses authentifiées de l'API.
 #### SEC-016 — L'algorithme de hachage des mots de passe n'est ni décidé ni outillé
 
 **Sévérité :** Moyenne
-**Fichiers :** `backend/src/pantry/domain/models.py:301` · `backend/pyproject.toml:15-26`
+**Fichiers :** `backend/src/chaudron/domain/models.py:301` · `backend/pyproject.toml:15-26`
 
 **Description.** `user_account.password_hash` est un `text` nullable. Aucun
 document ne dit avec quoi il est produit, et **aucune dépendance de hachage n'est
@@ -814,7 +814,7 @@ ont l'air :
 3. Ajouter `.github/dependabot.yml` couvrant `github-actions`, `uv` (ou `pip`) et
    `docker`.
 4. Ajouter `.github/CODEOWNERS` sur `ops/`, `.github/`, `docs/adr/` et
-   `backend/src/pantry/domain/`.
+   `backend/src/chaudron/domain/`.
 5. Vérifier que `gitleaks/gitleaks-action@v2` ne requiert pas de licence pour ce
    dépôt : ce point conditionne le fonctionnement réel du job, et il est
    silencieux s'il échoue à s'initialiser.
@@ -824,13 +824,13 @@ ont l'air :
 #### SEC-018 — Aucune borne sur les uploads HTTP, face à un `/tmp` de 64 Mo
 
 **Sévérité :** Moyenne
-**Fichiers :** `ops/pantry.container:60-62` · `.env.example:100-101` ·
+**Fichiers :** `ops/chaudron.container:60-62` · `.env.example:100-101` ·
 `backend/pyproject.toml:25` (`python-multipart`)
 
 **Description.** Le conteneur est en `ReadOnly=true` avec un unique
 `Tmpfs=/tmp:rw,size=64M`. C'est un bon durcissement. Mais `python-multipart`
 déverse sur disque au-delà d'un seuil, et **aucune borne de taille n'existe pour
-l'upload HTTP d'un ticket** : `PANTRY_INBOUND_EMAIL_MAX_BYTES` ne couvre que la
+l'upload HTTP d'un ticket** : `CHAUDRON_INBOUND_EMAIL_MAX_BYTES` ne couvre que la
 voie email. Un upload volumineux remplit les 64 Mo et fait échouer tout ce qui a
 besoin d'écrire.
 
@@ -840,7 +840,7 @@ obligatoire sur les listes potentiellement longues (`stock_movement`,
 
 **Correction.**
 
-1. Ajouter `PANTRY_RECEIPT_MAX_UPLOAD_BYTES`, appliquée **avant** la lecture du
+1. Ajouter `CHAUDRON_RECEIPT_MAX_UPLOAD_BYTES`, appliquée **avant** la lecture du
    corps (refus sur `Content-Length`, plus vérification en flux), et refuser au
    niveau du reverse proxy également.
 2. Configurer explicitement le seuil de déversement de `python-multipart` et le
@@ -873,7 +873,7 @@ deux liens plutôt que de publier un dépôt qui promet un document inexistant.
 #### SEC-020 — Aucune journalisation d'audit des accès aux actifs sensibles
 
 **Sévérité :** Moyenne
-**Fichiers :** `backend/src/pantry/domain/models.py` (aucune table d'audit) ·
+**Fichiers :** `backend/src/chaudron/domain/models.py` (aucune table d'audit) ·
 `docs/architecture.md:229-239`
 
 **Description.** L'observabilité prévue est bonne pour l'exploitation : logs
@@ -912,14 +912,14 @@ d'authentification.
 **Sévérité :** Faible
 **Fichier :** `ops/README.md:183-190`
 
-**Description.** `install -m 0600 /dev/null ~pantry/pantry.env` figure dans une
+**Description.** `install -m 0600 /dev/null ~chaudron/chaudron.env` figure dans une
 section dont les commandes précédentes s'exécutent en `root` (`useradd`,
 `install -d`). Le fichier sera donc **possédé par root en mode 0600**, et le
-compte `pantry` — sous lequel tourne le quadlet — ne pourra pas le lire :
+compte `chaudron` — sous lequel tourne le quadlet — ne pourra pas le lire :
 `EnvironmentFile=` échouera au démarrage. Le mode 0600 est le bon réflexe ; le
 propriétaire ne l'est pas.
 
-**Correction.** `install -o pantry -g pantry -m 0600 /dev/null ~pantry/pantry.env`,
+**Correction.** `install -o chaudron -g chaudron -m 0600 /dev/null ~chaudron/chaudron.env`,
 et préciser sous quel compte chaque bloc de la section §2 doit être exécuté — la
 distinction est déjà bien faite en §2.3, elle manque en §2.4.
 
@@ -928,13 +928,13 @@ distinction est déjà bien faite en §2.3, elle manque en §2.4.
 #### SEC-022 — L'URL du dépôt est incohérente entre les quadlets et le reste du projet
 
 **Sévérité :** Faible
-**Fichiers :** `ops/pantry.container:11` · `ops/pantry-db.container:11`
-(`https://github.com/stackops/pantry`) · `README.md:11`, `SECURITY.md:35`,
+**Fichiers :** `ops/chaudron.container:11` · `ops/chaudron-db.container:11`
+(`https://github.com/stackops/chaudron`) · `README.md:11`, `SECURITY.md:35`,
 `CONTRIBUTING.md:75`, `backend/pyproject.toml:29`,
-`.github/ISSUE_TEMPLATE/config.yml:11` (`ClaraVnk/pantry`)
+`.github/ISSUE_TEMPLATE/config.yml:11` (`ClaraVnk/chaudron`)
 
-**Description.** Les deux unités quadlet pointent vers `stackops/pantry`, tout le
-reste vers `ClaraVnk/pantry`. Ce n'est pas qu'une coquille : un opérateur qui
+**Description.** Les deux unités quadlet pointent vers `stackops/chaudron`, tout le
+reste vers `ClaraVnk/chaudron`. Ce n'est pas qu'une coquille : un opérateur qui
 découvre un problème de sécurité en lisant l'unité systemd sur son serveur suivra
 le lien `Documentation=` et atterrira sur un dépôt qui n'est pas celui du projet.
 Le canal de signalement décrit dans `SECURITY.md` est alors contourné avant même
@@ -949,7 +949,7 @@ l'ensemble des occurrences d'un coup.
 #### SEC-023 — `DAC_OVERRIDE` sur le conteneur de base de données
 
 **Sévérité :** Faible
-**Fichier :** `ops/pantry-db.container:52-53`
+**Fichier :** `ops/chaudron-db.container:52-53`
 
 **Description.** Le quadlet applique `DropCapability=ALL` puis réintroduit
 `CHOWN,DAC_OVERRIDE,FOWNER,SETGID,SETUID`. La démarche est la bonne, et ces
@@ -960,7 +960,7 @@ les vérifications de permissions de fichiers dans le conteneur.
 
 **Correction.** Optionnel et à mesurer, pas à appliquer les yeux fermés : fixer
 l'appartenance du répertoire de données sur l'hôte
-(`podman unshare chown -R 999:999 ~/pantry/data/postgres`, la technique est déjà
+(`podman unshare chown -R 999:999 ~/chaudron/data/postgres`, la technique est déjà
 documentée pour les uploads en `ops/README.md:247`), puis retirer `DAC_OVERRIDE`
 et `FOWNER` et vérifier que `initdb` **et** un redémarrage passent. Si l'un des
 deux échoue, conserver la configuration actuelle et l'annoter — une capacité
@@ -999,7 +999,7 @@ déclenché uniquement sur `push` de `main` ou sur tag.
 **Sévérité :** Faible
 **Fichier :** `.github/workflows/ci.yml:96-99,111`
 
-**Description.** `POSTGRES_PASSWORD: pantry` et le DSN correspondant sont écrits
+**Description.** `POSTGRES_PASSWORD: chaudron` et le DSN correspondant sont écrits
 en clair. Ce **n'est pas une fuite** : le service conteneurisé naît et meurt avec
 le job, il n'est joignable que depuis le runner, et la ligne 108 le documente
 correctement. Deux inconvénients subsistent : tout scanner de secrets signalera
@@ -1018,13 +1018,13 @@ partir d'elle, ou ajouter une exclusion nommée et commentée dans la configurat
 
 ---
 
-#### SEC-026 — `PANTRY_CREDENTIAL_ENCRYPTION_KEY` est absente de l'environnement de test
+#### SEC-026 — `CHAUDRON_CREDENTIAL_ENCRYPTION_KEY` est absente de l'environnement de test
 
 **Sévérité :** Informationnel
 **Fichier :** `.github/workflows/ci.yml:107-112`
 
-Le job de tests fournit `PANTRY_ENV`, `PANTRY_LOG_LEVEL`, `PANTRY_DATABASE_URL`
-et `PANTRY_SECRET_KEY`, mais pas `PANTRY_CREDENTIAL_ENCRYPTION_KEY`, pourtant
+Le job de tests fournit `CHAUDRON_ENV`, `CHAUDRON_LOG_LEVEL`, `CHAUDRON_DATABASE_URL`
+et `CHAUDRON_SECRET_KEY`, mais pas `CHAUDRON_CREDENTIAL_ENCRYPTION_KEY`, pourtant
 marquée **REQUIRED** dans `.env.example:38-44`. Si la validation fail-fast est
 honnête, l'application ne démarrera pas en CI dès qu'un test l'instanciera.
 Ajouter une valeur de test explicite (`ci-only-not-a-real-key`), ce qui aura
@@ -1039,8 +1039,8 @@ l'effet secondaire utile de vérifier que la variable est bien obligatoire.
 
 `CONTRIBUTING.md` affirme que `.env.example` *« never carries a value that
 matters »* et fait de l'ajout d'une valeur réelle un motif de refus de pull
-request. Deux lignes en portent une : `PANTRY_LLM_DEFAULT_MODEL=claude-opus-5` et
-`PANTRY_OFF_BASE_URL=https://world.openfoodfacts.org`. Aucune n'est un secret, et
+request. Deux lignes en portent une : `CHAUDRON_LLM_DEFAULT_MODEL=claude-opus-5` et
+`CHAUDRON_OFF_BASE_URL=https://world.openfoodfacts.org`. Aucune n'est un secret, et
 ce sont des valeurs par défaut légitimes — mais la règle telle qu'écrite est déjà
 violée par le fichier qu'elle décrit. Soit préciser la règle (« aucune valeur
 **secrète** »), soit déplacer ces défauts dans le code de configuration, où ils
@@ -1122,7 +1122,7 @@ exigence produit, pas comme une note.
 | ID | Sévérité | Constat | Fichier principal |
 |---|---|---|---|
 | SEC-001 | **Critique** | Isolation entre foyers laissée à la convention applicative ; RLS reporté sur une prémisse fausse pour la pile choisie | `docs/adr/0006-…:49` |
-| SEC-002 | Élevée | `PANTRY_CREDENTIAL_ENCRYPTION_KEY` non provisionnée en secret Podman ; finit en clair à côté des sauvegardes | `ops/pantry.container:32,40-42` |
+| SEC-002 | Élevée | `CHAUDRON_CREDENTIAL_ENCRYPTION_KEY` non provisionnée en secret Podman ; finit en clair à côté des sauvegardes | `ops/chaudron.container:32,40-42` |
 | SEC-003 | Élevée | `last_error` / `parse_error` / `raw_response` peuvent recevoir et afficher une clé d'API en clair | `models.py:978,831,830` |
 | SEC-004 | Élevée | Deux sources de vérité pour l'autorisation `instance_owner` | `.env.example:52` / `models.py:273` |
 | SEC-005 | Élevée | Webhook email : rejeu, adresse de foyer devinable, énumération, aucune modélisation | `docs/architecture.md:153-163` |
@@ -1132,21 +1132,21 @@ exigence produit, pas comme une note.
 | SEC-009 | Élevée | Aucune limitation de débit conçue (connexion, webhook, upload, génération) | `.env.example` (absent) |
 | SEC-010 | Moyenne | Le démarrage rapide du README publie PostgreSQL sur toutes les interfaces | `README.md:169` |
 | SEC-011 | Moyenne | Actions GitHub tierces épinglées par tag mutable | `ci.yml:36,204` |
-| SEC-012 | Moyenne | Images de base par tag ; `AutoUpdate=registry` sur la base de données | `Containerfile:14,36` / `pantry-db.container:20` |
-| SEC-013 | Moyenne | `.gitignore` n'exclut ni dumps, ni clés, ni `pantry.env` | `.gitignore:14-21` |
+| SEC-012 | Moyenne | Images de base par tag ; `AutoUpdate=registry` sur la base de données | `Containerfile:14,36` / `chaudron-db.container:20` |
+| SEC-013 | Moyenne | `.gitignore` n'exclut ni dumps, ni clés, ni `chaudron.env` | `.gitignore:14-21` |
 | SEC-014 | Moyenne | Contenu Open Food Facts stocké brut et rendu comme fiable | `models.py:419-438` |
 | SEC-015 | Moyenne | CORS : pas de garde-fou origine générique + identifiants | `.env.example:109` |
 | SEC-016 | Moyenne | Hachage de mot de passe ni décidé ni outillé | `models.py:301` |
 | SEC-017 | Moyenne | Jobs de sécurité non bloquants, pas de scan planifié, pas de Dependabot | `ci.yml:169-206` |
-| SEC-018 | Moyenne | Aucune borne d'upload HTTP face à un `/tmp` de 64 Mo | `pantry.container:62` |
+| SEC-018 | Moyenne | Aucune borne d'upload HTTP face à un `/tmp` de 64 Mo | `chaudron.container:62` |
 | SEC-019 | Moyenne | `docs/technical-notes-ingestion.md` référencé deux fois, inexistant | `README.md:206` |
 | SEC-020 | Moyenne | Aucune journalisation d'audit des accès aux actifs sensibles | `models.py` (absent) |
-| SEC-021 | Faible | `pantry.env` créé avec le mauvais propriétaire | `ops/README.md:189` |
+| SEC-021 | Faible | `chaudron.env` créé avec le mauvais propriétaire | `ops/README.md:189` |
 | SEC-022 | Faible | URL de dépôt incohérente entre quadlets et reste du projet | `ops/*.container:11` |
-| SEC-023 | Faible | `DAC_OVERRIDE` sur le conteneur de base de données | `pantry-db.container:53` |
+| SEC-023 | Faible | `DAC_OVERRIDE` sur le conteneur de base de données | `chaudron-db.container:53` |
 | SEC-024 | Faible | `podman build` d'un `Containerfile` contrôlé par une PR de fork | `ci.yml:143-164` |
 | SEC-025 | Faible | Identifiants de base de test en clair dans le workflow | `ci.yml:96-99,111` |
-| SEC-026 | Info | `PANTRY_CREDENTIAL_ENCRYPTION_KEY` absente de l'environnement de test | `ci.yml:107-112` |
+| SEC-026 | Info | `CHAUDRON_CREDENTIAL_ENCRYPTION_KEY` absente de l'environnement de test | `ci.yml:107-112` |
 | SEC-027 | Info | `.env.example` porte des valeurs, contrairement à sa propre règle | `.env.example:61,89` |
 | SEC-028 | Info | Documents de cadrage périmés par rapport aux ADR acceptés | `docs/architecture.md:245-250` |
 | SEC-029 | Info | Identité git incohérente avec l'auteur déclaré | `.git/config` |
@@ -1172,7 +1172,7 @@ susceptibles d'induire un lecteur en erreur dès la première heure de publicati
 1. **SEC-029 — vérifier `user.name` et `user.email`.** Cinq secondes. Après le
    premier push, l'identité est dans chaque commit de l'historique public, pour
    toujours.
-2. **SEC-013 — compléter `.gitignore`** (`*.dump`, `*.sql`, `pantry.env`, `*.pem`,
+2. **SEC-013 — compléter `.gitignore`** (`*.dump`, `*.sql`, `chaudron.env`, `*.pem`,
    `*.key`) **et** corriger `ops/README.md:257` pour écrire les sauvegardes hors
    du dépôt. C'est la seule correction qui empêche une fuite *future* par simple
    copier-coller de la documentation.
