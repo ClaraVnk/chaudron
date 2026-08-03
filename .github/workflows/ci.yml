@@ -16,8 +16,11 @@ concurrency:
 env:
   PYTHON_VERSION: "3.14"
   UV_VERSION: "0.9.7"
-  # Deterministic installs: fail instead of silently re-resolving the lockfile.
-  UV_FROZEN: "1"
+  # Determinism comes from the explicit `--locked` on every sync and export
+  # below. Do NOT add UV_FROZEN here: `--locked` and `--frozen` are mutually
+  # exclusive, and setting the variable globally makes every one of those
+  # commands fail with exit code 2. `--locked` is the stricter of the two — it
+  # asserts the lockfile is current, where `--frozen` merely skips re-locking.
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -200,10 +203,28 @@ jobs:
           # Full history so gitleaks can scan every commit, not just the tip.
           fetch-depth: 0
 
-      - name: Scan for leaked secrets
-        uses: gitleaks/gitleaks-action@v2
+      # gitleaks is invoked directly rather than through gitleaks-action@v2.
+      # The action derives a commit range of the form `<base>^..<head>` and
+      # hands it to `git log`; on a repository's first push, `<base>` is the
+      # root commit and `<base>^` does not exist, so the scan aborts with exit
+      # code 1 — reported as a leak, while the log says "no leaks found".
+      # A red badge that means "the tool broke" is worse than no badge.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.24.3"
+        run: |
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # Two passes: the whole history, then the working tree. The second catches
+      # anything staged but not yet committed in a pull request build.
+      - name: Scan git history
+        run: gitleaks git . --redact --verbose --exit-code 1
+
+      - name: Scan working tree
+        run: gitleaks dir . --redact --verbose --exit-code 1
 
   # ---------------------------------------------------------------------------
   # 6. Frontend — READY BUT INACTIVE.
