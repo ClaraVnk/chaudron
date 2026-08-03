@@ -14,6 +14,12 @@ authors = [{ name = "ClaraVnk" }]
 # reviewed change to this file plus a regenerated uv.lock.
 dependencies = [
     "fastapi==0.141.1",
+    # Transitive via fastapi, pinned here as a security floor: 0.52.1 carries
+    # five known advisories (PYSEC-2026-161, -248, -249, -2280, -2281), the last
+    # of which is fixed in 1.3.1. fastapi only asks for `starlette>=0.46.0`, so
+    # nothing stops the resolver from picking a vulnerable build. Revisit when
+    # fastapi raises its own floor past this one.
+    "starlette==1.3.1",
     "uvicorn[standard]==0.52.1",
     "sqlalchemy[asyncio]==2.0.51",
     "asyncpg==0.31.0",
