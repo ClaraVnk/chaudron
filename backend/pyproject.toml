@@ -37,7 +37,7 @@ dependencies = [
     # that decided it -- no network stack at all: `grep -E '^(import|from)
     # (urllib|requests|socket|http|ssl)' pypdf/` is empty, so a PDF referencing a
     # remote URL cannot make this process fetch it. See infra/documents/pdf.py.
-    "pypdf==6.14.2",
+    "pypdf==6.15.0",
     # AES-256-GCM for the household provider keys at rest (docs/data-model.md
     # section 9.2). The only cryptography this project performs itself, and the
     # reason it uses a maintained binding rather than an implementation of its
