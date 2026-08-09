@@ -427,8 +427,15 @@ async def capture_set(browser: Browser, form_factor: str) -> list[Path]:
 
     await tab(page, "Recettes")
     await scroll_past_banner(page)
-    await suggest_recipes(page)
-    keep(await shoot(page, f"recipes{suffix}", form_factor))
+    # The model call is skipped when this capture was filtered out, and that is
+    # not an optimisation. Asking for suggestions is the one step here that can
+    # fail loudly -- `suggest_recipes` raises `SystemExit` when no provider is
+    # configured -- so leaving it in a filtered run aborted the whole script
+    # before the wide form factor ever started, and silently left those captures
+    # at whatever version was on disk.
+    if not _skip(f"recipes{suffix}"):
+        await suggest_recipes(page)
+        keep(await shoot(page, f"recipes{suffix}", form_factor))
 
     await page.close()
     return written
