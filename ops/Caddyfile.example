@@ -230,6 +230,28 @@
 				request>headers>Authorization delete
 				request>headers>Cookie delete
 				request>headers>X-Household-Id delete
+
+				# The same reset token, on the way back out. `delete reset`
+				# above only reaches the *request* query string, and the
+				# `@reset_on_root` redirect answers 302 with the token in a
+				# `Location` header -- which the console encoder logs. So the
+				# credential was written to journald by the response even
+				# though the request had been scrubbed, and the comment beside
+				# that redirect asserted a protection that did not exist.
+				#
+				# Measured on caddy 2.11.4 rather than reasoned about: the
+				# token was present in the access line before this line and
+				# absent after it, and the 302 itself still appears, so the
+				# event stays visible while the credential does not.
+				#
+				# The cost is that no access line carries a redirect target
+				# any more. That is worth one live credential.
+				#
+				# `Cookie`, `Set-Cookie` and `Authorization` need no equivalent
+				# here: Caddy redacts them itself while `log_credentials` is
+				# off, so the three `delete`s above are belt and braces. This
+				# one is load-bearing.
+				resp_headers>Location delete
 			}
 		}
 	}
@@ -489,8 +511,11 @@
 	# discovered by the first person who forgets a password. Two mechanisms, one
 	# of which does not depend on anybody remembering.
 	#
-	# The token survives the redirect in a `Location` header; the log filter
-	# above drops `reset` from both this request and the redirected one.
+	# The token survives the redirect in a `Location` header. This used to say
+	# the log filter "drops `reset` from both this request and the redirected
+	# one", and that was false in the direction that mattered: `delete reset`
+	# reaches the request's query string only, so the 302 wrote a live
+	# credential into journald. The filter now also deletes `resp_headers>Location`.
 	@reset_on_root {
 		path /
 		query reset=*
