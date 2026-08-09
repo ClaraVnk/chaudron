@@ -102,6 +102,8 @@ export function InventoryScreen({
   const [search, setSearch] = useState('');
   const [locationId, setLocationId] = useState<string | null>(null);
   const [expiringOnly, setExpiringOnly] = useState(false);
+  /** Whether the "add another location" form is unfolded under the filters. */
+  const [addingLocation, setAddingLocation] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -378,7 +380,38 @@ export function InventoryScreen({
               {location.name} ({location.item_count})
             </Chip>
           ))}
+          {/*
+            The only way to create a location once the household has one. Both
+            places that render `LocationSetup` are gated on there being *no*
+            location — the first-run branch above, and the add-item screen —
+            so a household that created a fridge could never add a freezer,
+            while the first-run copy promised "vous pourrez en ajouter d'autres
+            à tout moment".
+
+            That is worse here than a missing convenience: `kind: 'freezer'`
+            is what suspends expiry, so the whole freezing behaviour was
+            unreachable for anyone who did not create the freezer during the
+            very first visit.
+          */}
+          <Chip
+            active={addingLocation}
+            onClick={() => {
+              setAddingLocation((open) => !open);
+            }}
+          >
+            {addingLocation ? '× Annuler' : '+ Emplacement'}
+          </Chip>
         </ChipRow>
+
+        {addingLocation ? (
+          <LocationSetup
+            existing={locations}
+            onCreated={(location) => {
+              onLocationCreated(location);
+              setAddingLocation(false);
+            }}
+          />
+        ) : null}
 
         <ChipRow label="Filtrer par péremption">
           <Chip
