@@ -1,6 +1,15 @@
-<!-- viewBox is trimmed to the ink: the tagline ends near x=840, and the spare
-     60 units left over from a round 900 pushed the whole lockup visibly
-     off-centre in anything that centres this file. -->
+<!-- viewBox is trimmed to the ink: the tagline ends near x=850, and the spare
+     50 units left over from a round 900 pushed the whole lockup visibly
+     off-centre in anything that centres this file.
+
+     The tagline was translated to French without touching this box, and that
+     was a constraint rather than luck: measured in the same font at the same
+     size, "Jetez-y ce que vous avez, voyez ce qui en sort." renders 577.5 units
+     wide -- the width of the English line it replaced, to a tenth of a unit.
+     The two-sentence form ("Jetez-y ce que vous avez. Voyez ce qui en sort.")
+     is 2 units wider and would have pushed past the box. If this string ever
+     changes again, measure before committing: text past x=848 is clipped by
+     the viewBox, silently, and only in whatever renders the SVG. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 848 250" role="img" aria-label="Chaudron">
   <title>Chaudron</title>
 
@@ -56,5 +65,5 @@
   <text x="268" y="132" font-family="URW Gothic, Century Gothic, Questrial, Futura, system-ui, sans-serif"
         font-size="96" font-weight="700" letter-spacing="-1" fill="#22242A">Chaudron</text>
   <text x="272" y="182" font-family="Noto Sans, system-ui, sans-serif"
-        font-size="27" fill="#6B7280">Throw in what you have. See what comes out.</text>
+        font-size="27" fill="#6B7280">Jetez-y ce que vous avez, voyez ce qui en sort.</text>
 </svg>

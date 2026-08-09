@@ -128,6 +128,55 @@ own data" (ADR-0007) contradicts the premise: the operator's TLS terminator
 would see every household's plaintext. Nothing prevents an operator choosing
 this; it is not the documented default.
 
+> **Amendment, 2026-08-09 — the first real deployment does exactly this, and the
+> objection above needs splitting in two.**
+>
+> Chaudron now runs behind a self-hosted [Pangolin](https://github.com/fosrl/pangolin)
+> reverse proxy: the public name resolves to the proxy, which terminates TLS and
+> reaches the application host over a WireGuard tunnel. The paragraph above
+> conflates two distinct objections, and only one of them survives that setup.
+>
+> **The trust objection does not apply.** It was written against Cloudflare and
+> ngrok — *third parties*. A terminator the operator runs themselves hands
+> plaintext to nobody new.
+>
+> **The mechanical objection does apply, and is the part worth writing down.**
+> The terminator sees every household's plaintext regardless of who owns it:
+> session cookies, CalDAV Basic credentials, and every recipe prompt with its
+> health signals. That machine therefore inherits the application host's trust
+> level. Two hosts to compromise instead of one is not automatically worse, but
+> it is a *different* threat model, and pretending the second host is "just a
+> proxy" is how it ends up outside the backup, patch and audit scope that the
+> first one has.
+>
+> **What changes in this repository if you deploy that way**, and it is less
+> than it looks — every control in `ops/Caddyfile.example` stays, because none
+> of them is TLS:
+>
+> - The site address takes an `http://` scheme prefix and the global block gets
+>   `auto_https off`. Without both, Caddy orders a certificate for a name that
+>   resolves somewhere else; the order fails on repeat and Let's Encrypt rate
+>   limits the failures.
+> - The `email` directive goes, and `/data` stops being the most valuable
+>   directory on the host — it no longer holds a private key.
+> - The proxy publishes one plain-HTTP port instead of :80 and :443, and what
+>   restricts access to it is the firewall, not TLS.
+> - `header_up X-Forwarded-Proto https` becomes load-bearing. The origin speaks
+>   HTTP while the browser is on HTTPS, and the session cookie is
+>   `__Host-`/`Secure`.
+> - `trusted_proxies` must name the tunnel's address. Miss it and every client
+>   on the internet collapses into one bucket for every IP-keyed rate limiter —
+>   which fails safe, silently, and presents as a legitimate user getting `429`
+>   because a stranger spent the budget.
+> - Check that the front proxy does not add its own `Content-Security-Policy`.
+>   Browsers enforce the **intersection** of every policy they receive, so a
+>   second one silently subtracts from this one — `wasm-unsafe-eval` disappears
+>   and the barcode scanner stops working, with nothing in any server log.
+>
+> `Strict-Transport-Security` stays, and is still correct: RFC 6797 asks the
+> header to be ignored when the *browser's* transport is insecure, and the
+> browser's transport is TLS to the proxy. The plaintext hop is behind it.
+
 **For the deployment gate**, the four options `ops/README.md` had already
 enumerated:
 
