@@ -64,6 +64,29 @@ EnvironmentFile=%h/chaudron/chaudron.env
 # them the ambiguous `chaudron-database-url` this used to share with the API.
 Secret=chaudron-database-url-owner,type=env,target=CHAUDRON_DATABASE_URL
 
+# Mounted although a migration uses neither of them, because `migrations/env.py`
+# reaches the DSN through `get_settings()` — and that validates the WHOLE
+# settings model, not the one field it was asked for. Without these two the unit
+# dies on a clean install with
+#
+#   ConfigurationError: invalid Chaudron configuration:
+#     secret_key: Field required; credential_encryption_key: Field required
+#
+# which is a first-deployment blocker: §2.3 creates both secrets, §2.4 forbids
+# putting anything secret in `chaudron.env`, and no unit mounted them here. The
+# operator stuck at that point improvises, and the natural improvisation is the
+# env file — which is precisely what `Secret=` exists to prevent.
+#
+# Mounting them is the narrow fix, not the right one. The right one is for the
+# migration runner to read the DSN without constructing the application's whole
+# configuration: a migration decrypts nothing, so requiring the key that
+# decrypts every household's provider credential to run `alembic upgrade` gives
+# the migrator a secret it has no use for. Left as is deliberately — changing
+# how settings are loaded is a code change with its own test surface, and this
+# file is not the place to make it silently.
+Secret=chaudron-secret-key,type=env,target=CHAUDRON_SECRET_KEY
+Secret=chaudron-credential-encryption-key,type=env,target=CHAUDRON_CREDENTIAL_ENCRYPTION_KEY
+
 NoNewPrivileges=true
 DropCapability=ALL
 ReadOnly=true
