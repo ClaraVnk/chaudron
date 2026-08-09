@@ -17,9 +17,11 @@ Never hand-edit the generated PNGs. Edit the SVG, re-run this, commit both.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import struct
 import sys
 from pathlib import Path
+from typing import Final
 
 from playwright.async_api import Browser, async_playwright
 
@@ -190,20 +192,31 @@ async def render_all() -> list[Path]:
             await shoot(browser, page_html(logo, 720, 212), 720, 212, ASSETS / "logo.png")
         )
 
+        # 1200x630, and the numbers are not arbitrary: that is 1.91:1, the ratio
+        # Facebook, LinkedIn and X lay their large cards out on. This was
+        # 1280x640 -- a 2.00 ratio, close enough to look right in a file manager
+        # and wrong everywhere it is actually used, because each platform
+        # centre-crops to 1.91:1 and takes roughly 4.5% off the height. With the
+        # logo centred that is survivable; with anything near the top or bottom
+        # edge it is a beheading, and it only shows up once the link is posted.
+        #
+        # The logo keeps its share of the frame: 880/1280 of the width becomes
+        # 825/1200, and its height follows its own aspect ratio (3.398:1) rather
+        # than being scaled independently.
         social = (
             "<!doctype html><meta charset=utf-8><style>html,body{margin:0}"
-            ".c{width:1280px;height:640px;"
+            ".c{width:1200px;height:630px;"
             "background:linear-gradient(135deg,#FBF7F0,#F2E9DC);"
             "display:flex;align-items:center;justify-content:center}"
-            "svg{width:880px;height:259px;display:block}"
+            "svg{width:825px;height:243px;display:block}"
             "</style><div class=c>" + logo + "</div>"
         )
         written.append(
             await shoot(
                 browser,
                 social,
-                1280,
-                640,
+                1200,
+                630,
                 ASSETS / "social-preview.png",
                 transparent=False,
             )
@@ -214,12 +227,55 @@ async def render_all() -> list[Path]:
     return written
 
 
+#: The subset of `assets/` the site actually serves, and where it has to land.
+#: Everything else here is a source artefact: the SVGs, the two wordmark
+#: renderings, the three favicon sizes that only exist to be packed into the
+#: `.ico`.
+#:
+#: This list exists because the copy used to be manual, and manual worked right
+#: up until it didn't: `social-preview.png` was regenerated at 1200x630 and
+#: `frontend/public/` kept serving the 1280x640 one, so the Open Graph card in
+#: the shipped page was the old image while the file beside it was the new one.
+#: Nothing reports that. The two are only ever compared by whoever happens to
+#: post the link.
+_WEB_SERVED: Final = (
+    "favicon.ico",
+    "icon.svg",
+    "icon-192.png",
+    "icon-512.png",
+    "icon-maskable-512.png",
+    "apple-touch-icon.png",
+    "social-preview.png",
+)
+
+
+def sync_public() -> list[Path]:
+    """Copy the served assets into `frontend/public/`, returning what changed."""
+    public = ROOT / "frontend" / "public"
+    changed: list[Path] = []
+    for name in _WEB_SERVED:
+        source, target = ASSETS / name, public / name
+        if not source.exists():
+            raise SystemExit(f"{source} is missing; generation did not complete")
+        if not target.exists() or target.read_bytes() != source.read_bytes():
+            shutil.copyfile(source, target)
+            changed.append(target)
+    return changed
+
+
 def main() -> None:
     report(asyncio.run(render_all()))
     build_ico(
         [(s, ASSETS / f"favicon-{s}.png") for s in (16, 32, 48)],
         ASSETS / "favicon.ico",
     )
+    updated = sync_public()
+    if updated:
+        sys.stdout.write("\nCopied into frontend/public/:\n")
+        for path in updated:
+            sys.stdout.write(f"  {path.relative_to(ROOT)}\n")
+    else:
+        sys.stdout.write("\nfrontend/public/ already matches assets/\n")
 
 
 if __name__ == "__main__":
