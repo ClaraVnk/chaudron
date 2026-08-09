@@ -96,8 +96,11 @@ function Shell({ tab, onTabChange }: ShellProps) {
       <header className={styles.header}>
         <img className={styles.logo} src="/icon-192.png" alt="" width={32} height={32} />
         <span className={styles.wordmark}>Chaudron</span>
-        {/* Brand tagline, verbatim from assets/logo.svg — brand copy, not UI copy. */}
-        <span className={styles.tagline}>Throw in what you have. See what comes out.</span>
+        {/* Brand tagline, verbatim from assets/logo.svg — brand copy, not UI copy.
+            French because every other string on this screen is: an English
+            sentence in the header of a French interface reads as an oversight,
+            not as branding. Change both together or they drift. */}
+        <span className={styles.tagline}>Jetez-y ce que vous avez, voyez ce qui en sort.</span>
         <AccountMenu />
       </header>
 
