@@ -66,7 +66,7 @@ _DEFAULT_ROLE: Final = "chaudron_app"
 #: explicitly so a hardened database that revoked PUBLIC still works.
 _TENANT_FUNCTION: Final = "chaudron_current_household()"
 
-#: The two ``SECURITY DEFINER`` functions that **cross** row-level security by
+#: The ``SECURITY DEFINER`` functions that **cross** row-level security by
 #: construction, and the reason this script has to grant anything at all.
 #:
 #: ``chaudron_user_memberships`` answers "which households may this account open?"
@@ -90,13 +90,21 @@ _TENANT_FUNCTION: Final = "chaudron_current_household()"
 #: creates it, rather than retrofitted a revision later. Without the grant below,
 #: every attempt to join a household is refused as though the invitation did not
 #: exist -- which is the correct failure mode and an impossible one to diagnose.
+#: ``chaudron_account_erasure_survey`` (revision ``0026``) is the fourth, and it
+#: joined with its ``REVOKE`` already written into the migration that creates it.
+#: It answers "would erasing this account leave a household with nobody who can
+#: administer it?", which spans every household the account belongs to -- and
+#: ``infra/db.py`` gives a transaction exactly one, so there is no tenant to post
+#: that would make the read legal. Without the grant below, ``DELETE /v1/account``
+#: fails outright rather than erasing anything, which is the correct direction.
 _DEFINER_FUNCTIONS: Final[tuple[str, ...]] = (
     "chaudron_user_memberships(uuid)",
     "chaudron_resolve_machine_token(text)",
     "chaudron_resolve_household_invitation(text)",
+    "chaudron_account_erasure_survey(uuid)",
 )
 
-#: Everything the role must be able to execute: the three functions above plus the
+#: Everything the role must be able to execute: the four functions above plus the
 #: tenant reader. Used by :func:`provision` to grant and by :func:`report` to
 #: check, from one list, so the two cannot drift.
 _REQUIRED_FUNCTIONS: Final[tuple[str, ...]] = (_TENANT_FUNCTION, *_DEFINER_FUNCTIONS)
@@ -307,7 +315,7 @@ async def report(connection: AsyncConnection, role: str) -> list[str]:
 
     # The check a deployment pipeline needs most after revision `0014`, because
     # the failure it catches is total and looks like nothing else: without EXECUTE
-    # on the two SECURITY DEFINER functions the API cannot resolve a session or a
+    # on these SECURITY DEFINER functions the API cannot resolve a session or a
     # token, so every request answers 401 and the logs say only that nobody is
     # signed in. `has_function_privilege` is asked per function rather than read
     # off `proacl`, so a grant inherited through a group role counts -- which is

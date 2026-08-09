@@ -627,7 +627,10 @@ and retained**, and it is sent to a model provider. Hence it must:
 
 - be handled at the Article 9 level of protection, even if its legal
   qualification is debatable;
-- be given **the shortest retention period in the system**;
+- be given **the shortest retention period in the system** — *implemented since
+  revision `0027`*, at the thirty days §8.4 proposes, by
+  `backend/scripts/purge_retained_data.py`. Until then it had none at all, because
+  the column was `NOT NULL` and there was nothing to write in its place;
 - never be exposed in a cross-household administration interface.
 
 ### 8.3 Legal bases
@@ -677,12 +680,13 @@ one assumes **a column and a task**, without which it does not exist.
 |---|---|---|
 | Receipt image | **Purge as soon as the review is confirmed**, or 30 days maximum | After review it serves only to contest; the extracted lines are enough. It is the heaviest and most sensitive item of data. |
 | `receipt.raw_response` | 90 days | Useful for debugging a non-deterministic pipeline, useless beyond that. |
-| `recipe_suggestion.stock_snapshot` | **30 days** | Serves to explain a recent suggestion. A year-old home inventory serves nobody and weighs heavily in the event of a leak. |
+| `recipe_suggestion.stock_snapshot` | **30 days** | *Implemented at this figure, and the figure is still a proposal.* Revision `0027` made the column nullable — it was `NOT NULL`, so there was no way to stop holding a snapshot short of deleting the suggestion — and `backend/scripts/purge_retained_data.py` clears it, daily, via `ops/chaudron-purge-retained-data.timer`. `--snapshot-days` is where the operator arbitrates the number; the default is the one this row already proposed, because a default invented elsewhere would have been a policy smuggled in as a constant. What is **not** a proposal is that "for ever" was the wrong answer for the item §8.2 calls the one needing the shortest retention in the system. NULL means *no longer held*, never *the cupboard was empty*: an empty object would have satisfied the old constraint and fabricated a fact, which is the trap revisions `0014` and `0016` both refused. The suggestion itself — title, steps, rating, cost — is untouched. |
 | `receipt_line.raw_label` | Long retention **after anonymising the link to the household** | It is the corpus for improving matching; it does not need a `household_id`. |
 | `stock_movement` | 24 months | Annual waste statistics; beyond that, aggregate. |
 | Application logs | 30 days | Diagnostics and security. |
 | `user_session`, `machine_token` (dead rows) | **30 days after they stop authenticating**, swept weekly | *Decided and implemented*, unlike the rest of this table: `backend/scripts/purge_expired_credentials.py`, `ops/chaudron-purge-credentials.timer`. Not zero, because these rows are the only record of when a session ended and whose it was — the first thing a breach review reads (§8.6). Not never, because `user_session` is read on every authenticated request and nothing had ever removed a row from it. |
-| Deleted account | Immediate and **total** erasure, database **and** object storage | See 8.5. |
+| `rate_limit_bucket` | **Swept daily**, for buckets idle 24 h | *Decided and implemented*: `backend/scripts/purge_retained_data.py`, `ops/chaudron-purge-retained-data.timer`. Not a retention judgement but an arithmetic one — a bucket untouched for a full window has refilled to capacity, so deleting it and re-creating it full are the same thing, and the widest window in the application is one hour. It is in this table because `bucket_key` holds **normalised e-mail addresses**, including of people who never had an account here (every address typed into the sign-in form). The table carries no `household_id` by design, so no cascade reaches those rows and no household erasure can; account erasure deletes its own address, and this bounds every other row. Anything **below** an hour is refused rather than clamped: deleting a bucket that has not refilled is a refund, and a refund on the sign-in limiter is a password spray with the limit taken off. |
+| Deleted account | Immediate and **total** erasure, database **and** object storage | **Built**: `DELETE /v1/account`. See 8.5. |
 
 ### 8.5 Data subject rights, and what the software must provide
 
@@ -692,7 +696,8 @@ one assumes **a column and a task**, without which it does not exist.
 | **Erasure (art. 17)** | Deletion of a household **and** of its objects | **Built**: `DELETE /v1/households`, owner-only. `ON DELETE CASCADE` from `household` does the work; the route makes it reachable, verifies it by re-reading every tenant table before committing, and returns the per-table counts as a receipt. Migration `0017` adds the engine half — row-level security on `household` restricting `DELETE` to the posted tenant — so a wrong identifier erases nothing rather than a stranger. **On the objects**: this build stores no receipt image and has no object-storage client, so rather than imply a bucket was cleaned, the erasure **refuses** (`409`) when it finds a receipt carrying a retained key. A deployment that reintroduces retention has to reintroduce its deletion. Nothing is anonymised to survive: the §8.4 proposal to keep `receipt_line.raw_label` "after anonymising the link" is deliberately not applied here. |
 | Rectification (art. 16) | Correction of the lines and of the entries; the local correction takes precedence over an external resynchronisation | Planned on the product side, to be carried into the schema. |
 | Objection / withdrawal of consent | Disabling sending to the external provider without breaking the rest of the application | Acquired by design: the model features are optional and the rest of Chaudron works without them. |
-| The member who leaves | What becomes of a household whose last member leaves? | **Not settled.** The `CASCADE` answers technically, not legally: a household's data belong to several people, and one person's departure must neither erase the others' data nor retain them indefinitely. |
+| **Erasure of an account (art. 17)** | Deletion of the person: identity, credentials, memberships | **Built**: `DELETE /v1/account`, and it is the caller's own account or nothing — no identifier in the path, no body, no household header, unreachable by a machine token. `ON DELETE CASCADE` takes the sessions, the reset tokens, the machine tokens, the memberships and the invitations this account issued; the fourteen `SET NULL` columns that merely *mention* an account are each somebody else's row and are cleared, not deleted. It also deletes the `rate_limit_bucket` rows keyed on the address, which is the one table nothing cascades into (§8.4). It **refuses** — `409`, naming the households — when its own erasure would leave one with no owner: see the row below, which it deliberately does not settle. |
+| The member who leaves | What becomes of a household whose last member leaves? | **Still not settled, and now bounded.** The `CASCADE` answers technically, not legally: a household's data belong to several people, and one person's departure must neither erase the others' data nor retain them indefinitely. Nothing here decides that. What both erasure routes now do is *decline to create the state*: `DELETE /v1/households/members/{user_id}` refuses the removal that would leave no owner, and `DELETE /v1/account` refuses the erasure that would leave any household without one — naming them, so the person can erase each with `DELETE /v1/households`, which is theirs to call, and come back. The cost is real and is named in `services/privacy.py`: somebody who solely owns three households makes four calls, and there is still no route to hand ownership to another member, so today the actionable half of the refusal is the erasure. That is a product gap, not a compliance answer. |
 | Information | A template privacy policy, shipped with the software, that the operator adapts | To be written. Self-hostable software that ships none leaves each operator to produce a false one. |
 
 ### 8.6 Data breach
@@ -715,6 +720,18 @@ everybody who could ask the question holds the original. Migration `0017` carrie
 the full argument. **The other three are still unrecorded**, and for them a table
 does not have that problem: reading a key, exporting a household and changing a
 provider configuration all leave the household in existence.
+
+**Erasing an account writes a second line, and it names nobody at all.**
+`account_erased` carries two integers — memberships ended, rate-limit rows
+forgotten — and no `user_id`, no address, no display name, no household. That is
+deliberately *less* than `household_erased`, and the asymmetry is the argument
+rather than an inconsistency: `infra/logging.py` stamps `household_id` on every
+request it serves, so naming the household in that line discloses nothing new to
+the journal, and it writes no account identifier anywhere. A `user_id` here would
+make this the one place in the system where a person's identifier outlives their
+account — the exact retention migration `0017` refused to build a table for, in a
+file the operator keeps for thirty days. The identifiers go to the person instead,
+in the response body they walk away with.
 
 ---
 

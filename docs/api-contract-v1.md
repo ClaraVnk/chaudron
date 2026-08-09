@@ -33,7 +33,7 @@ Absent or unknown → `401`. A demonstration household is created by the seed.
 | Method | Path | Response |
 |---|---|---|
 | `GET` | `/healthz` | `200 {"status":"ok"}` — the process is alive. Does not touch the database. |
-| `GET` | `/readyz` | `200 {"status":"ready","checks":{"database":"ok"}}` or `503` with the detail |
+| `GET` | `/readyz` | `200 {"status":"ready","checks":{"database":"ok","row_level_security":"enforced","migrations":"ok"}}` or `503` with the same shape. `checks` is open-ended: read the keys you know and ignore the rest. `migrations` is `ok`\|`ahead` when ready, `outdated`\|`unknown` when refusing; `row_level_security` is `bypassed` only where that is deliberate (`local`, `ci`). A `503` for an unreachable database reports `{"database":"unavailable"}` alone — it claims nothing it could not observe. |
 
 ---
 

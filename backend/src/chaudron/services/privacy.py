@@ -56,6 +56,62 @@ retain an identifier of the subject who asked to be forgotten; migration ``0017`
 argues that at length. **Nothing else is logged from this module**: no name, no
 email, no product, no member. The counts are integers, and ``_scrub`` leaves
 integers alone.
+
+Account erasure
+---------------
+
+:meth:`PrivacyService.erase_account` was added after the four decisions above and
+does not revisit any of them. It answers the half of pentest item ``O-01`` that
+was left open -- ``user_account`` held an e-mail address, a display name and a
+password hash that no route could ever delete -- and it takes two further
+decisions, both of which are refusals.
+
+**It refuses rather than deciding what becomes of a household.** ``O-01`` records
+the open question as *"what becomes of a household whose last member leaves"* and
+``services/memberships.py`` answers it for one membership by declining to create
+the state: ``LastOwnerError`` refuses the removal that would leave a household with
+no owner. This method applies **that same rule to all of the account's memberships
+at once**, and adds nothing to it. If every household the account belongs to still
+has an owner once the account is gone, the memberships fall away with it and the
+households carry on, untouched, with the other members' data intact. If any one of
+them would be left with nobody who can administer it, the whole erasure is refused
+and the household is named, so the person can erase it themselves
+(``DELETE /v1/households``, which is theirs to call) and come back.
+
+Two properties of that shape are worth being explicit about, because both are
+costs.
+
+*The refusal is stated over the household, not over the account's role.*
+``LastOwnerError`` fires when the **target** is the last owner; this fires when the
+household would have **no** owner, which is the same thing on every state this API
+can produce -- an invitation cannot grant ``owner`` and a removal cannot take the
+last one away, so a household with members always has one -- and errs towards
+refusing on a state it cannot.
+
+*A person who solely owns three households makes four calls.* That is the price of
+not inventing a policy, and it is also the price of ``infra/db.py``'s rule that one
+transaction serves one household: erasing them here would mean either several
+transactions in one request or a tenant posted per household, and the first breaks
+the rule row-level security depends on while the second is not possible at all.
+There is no promote-another-member-to-owner route yet either, so today the
+actionable half of the refusal is the erasure. Both are product gaps this module
+names rather than papers over.
+
+**It reaches the one table no cascade can.** ``rate_limit_bucket`` deliberately
+carries no ``household_id`` (revision ``0018``) and its ``bucket_key`` is *"a
+household id, a client address, or a normalised e-mail"*. The e-mail rows are
+personal data with nothing to cascade from, so both erasures delete their own keys
+explicitly through :func:`~chaudron.infra.rate_limits.forget_bucket_keys` -- the
+account its address, the household its identifier -- inside the same transaction.
+Everything else in that table is bounded by ``scripts/purge_retained_data.py``.
+
+**The log line carries no account identifier**, unlike the household's. That is not
+an inconsistency: ``infra/logging.py`` puts ``household_id`` on every request it
+serves, so ``household_erased`` discloses nothing new to the operator's journal,
+and it writes no ``user_id`` anywhere. Recording one *here*, on the erasure of an
+account, would be the only place in the system where a person's identifier outlives
+their account -- which is exactly what migration ``0017`` refused to build a table
+for. The counts go to the log; the identifiers go to the person, in the response.
 """
 
 from __future__ import annotations
@@ -69,19 +125,24 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Final
 
-from sqlalchemy import Column, Table, delete, func, select
+from sqlalchemy import BigInteger, Column, Table, bindparam, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chaudron.domain.models import Base
+from chaudron.domain.models import Base, MembershipRole
 from chaudron.infra.db import set_transaction_household
+from chaudron.infra.rate_limits import forget_bucket_keys
 
 __all__ = [
     "EXPORT_VERSION",
     "TENANT_TABLES",
     "WITHHELD_COLUMNS",
+    "AccountErasureBlockedError",
+    "AccountErasureReceipt",
+    "EndedMembership",
     "ErasureBlockedError",
     "ErasureReceipt",
     "IncompleteErasureError",
+    "OwnerlessHousehold",
     "PrivacyService",
 ]
 
@@ -94,7 +155,7 @@ EXPORT_VERSION: Final = 1
 
 _TENANT_COLUMN: Final = "household_id"
 
-#: The five tables addressed by name rather than through the generic walk below.
+#: The six tables addressed by name rather than through the generic walk below.
 #: Taken from ``Base.metadata`` rather than through ``Model.__table__``, which the
 #: SQLAlchemy stubs type as ``FromClause`` -- enough for a query and not enough for
 #: ``delete()`` or for reading ``.name`` under ``mypy --strict``.
@@ -103,6 +164,7 @@ _HOUSEHOLD_MEMBER: Final[Table] = Base.metadata.tables["household_member"]
 _USER_ACCOUNT: Final[Table] = Base.metadata.tables["user_account"]
 _PRODUCT: Final[Table] = Base.metadata.tables["product"]
 _RECEIPT: Final[Table] = Base.metadata.tables["receipt"]
+_RATE_LIMIT_BUCKET: Final[Table] = Base.metadata.tables["rate_limit_bucket"]
 
 #: Every table that belongs to a household, in dependency order. Read from the
 #: model for the reason ``tests/tenancy/test_schema_tenant_guard.py`` gives: the
@@ -177,6 +239,29 @@ _WITHHELD_ELSEWHERE: Final[Mapping[str, str]] = {
 }
 
 
+#: Every household this account belongs to, with its role and how many *other*
+#: owners each one has -- past the row-level security on ``household_member``,
+#: through the ``SECURITY DEFINER`` function migration ``0026`` creates. Read that
+#: revision for why a plain query cannot answer this: the read spans every
+#: household the account belongs to, ``infra/db.py`` gives a transaction exactly
+#: one, and with no tenant posted the policy shows zero rows -- so the direct
+#: version reports that the account belongs to nothing and is safe to erase, which
+#: is the most dangerous wrong answer on offer.
+#:
+#: The identifier is bound, never interpolated, and the function returns counts
+#: rather than the other members' rows.
+_ACCOUNT_SURVEY: Final = (
+    text("SELECT * FROM chaudron_account_erasure_survey(:user_id)")
+    .bindparams(bindparam("user_id", type_=_USER_ACCOUNT.c.id.type))
+    .columns(
+        household_id=_HOUSEHOLD.c.id.type,
+        household_name=_HOUSEHOLD.c.name.type,
+        role=_HOUSEHOLD_MEMBER.c.role.type,
+        other_owner_count=BigInteger(),
+    )
+)
+
+
 class ErasureBlockedError(Exception):
     """Erasure would leave data behind that this application cannot reach."""
 
@@ -205,6 +290,50 @@ class IncompleteErasureError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class OwnerlessHousehold:
+    """A household this account's erasure would leave with nobody to administer it."""
+
+    household_id: uuid.UUID
+    name: str
+    #: The role the account being erased holds there. Reported so the message can
+    #: tell "you are its only owner" from "it has no owner at all", which is a
+    #: state no route can produce and which this refusal still declines to create.
+    role: MembershipRole
+
+
+class AccountErasureBlockedError(Exception):
+    """Erasing this account would leave at least one household without an owner.
+
+    The refusal ``services/memberships.py`` already makes for a single membership
+    (``LastOwnerError``), made once for all of them. It names the households, because
+    a refusal the person cannot act on is worse than no refusal: each one is theirs
+    to erase with ``DELETE /v1/households`` before coming back here.
+    """
+
+    def __init__(self, households: Sequence[OwnerlessHousehold]) -> None:
+        names = ", ".join(f"{household.name!r}" for household in households)
+        super().__init__(
+            f"{len(households)} household(s) would be left with nobody who can "
+            f"administer them: {names}. Erasing an account ends its memberships, and "
+            f"a household with no owner can no longer be configured, invited to or "
+            f"erased by anybody -- so its data would be retained with no one able to "
+            f"reach it, which is the opposite of what an erasure is for. Erase each "
+            f"of them first (DELETE /v1/households, which you may call as their "
+            f"owner), or have another owner take them over, then erase this account."
+        )
+        self.households = tuple(households)
+
+
+@dataclass(frozen=True, slots=True)
+class EndedMembership:
+    """One membership that fell away with the account, and the household it opened."""
+
+    household_id: uuid.UUID
+    name: str
+    role: MembershipRole
+
+
+@dataclass(frozen=True, slots=True)
 class ErasureReceipt:
     """What was removed, so the person who asked has something to keep."""
 
@@ -212,6 +341,23 @@ class ErasureReceipt:
     erased_at: datetime
     #: Table name to the number of rows removed, counted before the delete.
     rows_erased: Mapping[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class AccountErasureReceipt:
+    """What the erasure of one account removed.
+
+    Carries the households it used to open rather than a row count, because that is
+    the part the person cannot check afterwards: the account is gone, and with it
+    every screen that could have listed them.
+    """
+
+    user_id: uuid.UUID
+    erased_at: datetime
+    memberships_ended: tuple[EndedMembership, ...]
+    #: Rate-limit buckets keyed on this account's address, in every scope. See
+    #: :func:`~chaudron.infra.rate_limits.forget_bucket_keys`.
+    rate_limit_rows_forgotten: int
 
 
 class PrivacyService:
@@ -406,6 +552,14 @@ class PrivacyService:
             raise IncompleteErasureError(f"household {household_id} is not there to erase")
 
         await self._session.execute(delete(_HOUSEHOLD).where(_HOUSEHOLD.c.id == household_id))
+        # The one line the cascade cannot do for us. `rate_limit_bucket` carries no
+        # tenant by design (revision `0018`), so no foreign key reaches the buckets
+        # keyed on this household's identifier and they would outlive it. Counted
+        # beside the rest: a receipt that omitted them would describe a smaller
+        # erasure than the one that happened.
+        rows_erased[_RATE_LIMIT_BUCKET.name] = await forget_bucket_keys(
+            self._session, [str(household_id)]
+        )
 
         survivors = {
             table: count for table, count in (await self._row_counts(household_id)).items() if count
@@ -450,10 +604,142 @@ class PrivacyService:
         counts[_HOUSEHOLD.name] = int(count or 0)
         return counts
 
+    # ----------------------------------------------------------------- #
+    # Article 17, over an account rather than a household
+    # ----------------------------------------------------------------- #
+
+    async def erase_account(self, user_id: uuid.UUID) -> AccountErasureReceipt:
+        """Delete one account: its identity, its credentials, its memberships.
+
+        The module docstring argues the policy. What this method does, in order, and
+        none of it is interchangeable:
+
+        1. **Read the account.** Its address is needed before the row goes, to reach
+           the rate-limit buckets keyed on it -- and finding no row means somebody
+           erased it concurrently, which is a failure rather than a success with
+           nothing to do.
+        2. **Survey every household it belongs to**, past row-level security
+           (migration ``0026``), and refuse if any of them would be left with no
+           owner. Before anything is written, so a refusal costs nothing and leaves
+           nothing half-done.
+        3. **Forget the buckets keyed on the address**, in the same transaction as
+           the delete below. ``rate_limit_bucket`` has no tenant and no foreign key
+           to an account, so this is the one place those rows can be reached.
+        4. **Delete the row.** ``user_account`` is outside row-level security -- it
+           has no tenant and could not have one -- so the ``WHERE`` clause is the
+           whole of the authorisation the engine will see, and the identifier comes
+           from the caller's own session (``api/deps.py``), never from a body.
+           ``ON DELETE CASCADE`` takes all five things that *are* this account:
+           its memberships, its browser sessions, its outstanding reset tokens, its
+           machine tokens, and the invitations it issued. The last two are worth
+           saying out loud. A machine token dies with the account that minted it --
+           an appliance polling on it stops, which it would have done anyway at the
+           next request, since ``chaudron_resolve_machine_token`` joins back to a
+           membership that has just gone. And a pending invitation issued by an
+           account that no longer exists must not stay redeemable: it is a
+           membership of somebody else's household, offered by nobody.
+           ``ON DELETE SET NULL`` handles the fourteen columns that merely *mention*
+           an account -- who requested a suggestion, who invited whom, who moved
+           stock -- and every one of those is somebody else's row, so the mention is
+           cleared and the row stays.
+        5. **Read it all back.** Through the same ``SECURITY DEFINER`` function, for
+           the reason the survey needs it: a verification query on
+           ``household_member`` would be answered by the policy rather than by the
+           data, return zero rows whether or not any survived, and pass for ever.
+           That is worse than no post-condition at all.
+        """
+        account = (
+            (
+                await self._session.execute(
+                    select(_USER_ACCOUNT.c.id, _USER_ACCOUNT.c.email).where(
+                        _USER_ACCOUNT.c.id == user_id
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if account is None:
+            # `api/deps.py` resolved a live session for this account, so the row
+            # existed when the request was authorised. Answering "erased" would
+            # credit this request with work it did not do.
+            raise IncompleteErasureError(f"account {user_id} is not there to erase")
+
+        memberships = await self._household_survey(user_id)
+        blocked = [
+            OwnerlessHousehold(
+                household_id=row.household_id, name=row.household_name, role=row.role
+            )
+            for row in memberships
+            if row.other_owner_count == 0
+        ]
+        if blocked:
+            raise AccountErasureBlockedError(blocked)
+
+        forgotten = await forget_bucket_keys(self._session, _bucket_keys_for(account["email"]))
+        await self._session.execute(delete(_USER_ACCOUNT).where(_USER_ACCOUNT.c.id == user_id))
+
+        survivors = await self._household_survey(user_id)
+        still_there = await self._session.scalar(
+            select(func.count()).select_from(_USER_ACCOUNT).where(_USER_ACCOUNT.c.id == user_id)
+        )
+        if survivors or still_there:
+            raise IncompleteErasureError(
+                f"the erasure of account {user_id} left {len(survivors)} membership(s) "
+                f"and {int(still_there or 0)} account row(s) behind"
+            )
+
+        erased_at = datetime.now(UTC)
+        # Integers only, and no identifier of the person who asked to be forgotten.
+        # See the module docstring: this is the one erasure whose subject
+        # `infra/logging.py` does not already write on every request.
+        logger.info(
+            "account_erased",
+            extra={
+                "memberships_ended": len(memberships),
+                "rate_limit_rows_forgotten": forgotten,
+            },
+        )
+        return AccountErasureReceipt(
+            user_id=user_id,
+            erased_at=erased_at,
+            memberships_ended=tuple(
+                EndedMembership(
+                    household_id=row.household_id, name=row.household_name, role=row.role
+                )
+                for row in memberships
+            ),
+            rate_limit_rows_forgotten=forgotten,
+        )
+
+    async def _household_survey(self, user_id: uuid.UUID) -> Sequence[Any]:
+        """Every household this account belongs to, past the policy. See ``0026``."""
+        return (await self._session.execute(_ACCOUNT_SURVEY, {"user_id": user_id})).all()
+
 
 # --------------------------------------------------------------------------- #
 # Reading the model
 # --------------------------------------------------------------------------- #
+
+
+def _bucket_keys_for(email: str) -> tuple[str, ...]:
+    """The rate-limit keys this address can appear under.
+
+    Both e-mail-keyed limiters charge against the **normalised** address today --
+    ``routers/auth.py`` passes every one of them through ``normalise_email``, which
+    is the trim-and-lower-case that ``uq_user_account_email_lower`` performs -- so
+    the stored value and the key differ whenever the account was registered with
+    capitals. Normalising here is therefore not belt-and-braces, it is the whole
+    match: an account at ``Sujet@Example.Test`` has its buckets under
+    ``sujet@example.test`` and a delete on the column value alone would find none.
+
+    The stored spelling is kept beside it anyway, and that *is* belt-and-braces: it
+    costs one element of an ``IN`` list and removes the need to trust that every
+    limiter added later remembers to normalise. Duplicates collapse; a key that is
+    not in the table deletes nothing.
+    """
+    stored = email.strip()
+    return (stored, stored.lower())
 
 
 def _references_product(column: Column[Any]) -> bool:

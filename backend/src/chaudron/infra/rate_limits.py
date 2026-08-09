@@ -52,11 +52,12 @@ the lease would open.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from chaudron.api.throttling import AtCapacityError
 
@@ -94,9 +95,33 @@ _WRITE: Final = text("""
 #: re-creating it full are the same thing -- the arithmetic argument the in-memory
 #: sweep already makes. Without it the table grows one row per distinct client
 #: address, for ever.
-_SWEEP: Final = text("""
+#:
+#: Spelled once and shared by the count and the delete below, for the reason
+#: ``tests/test_credential_purge.py`` gives about the other sweep in this codebase:
+#: a dry run whose predicate differs from the statement it predicts is reassuring
+#: and wrong, which is worse than having no dry run at all.
+_IDLE: Final = "updated_at < now() - make_interval(secs => :older_than_seconds)"
+
+_SWEEP: Final = text(f"DELETE FROM rate_limit_bucket WHERE {_IDLE}")  # noqa: S608
+
+_COUNT_IDLE: Final = text(f"SELECT count(*) FROM rate_limit_bucket WHERE {_IDLE}")  # noqa: S608
+
+#: Forget every bucket whose *key* is one of these, whatever limiter it belongs to.
+#: Matched on the value rather than on a list of scopes on purpose: which limiters
+#: key on an e-mail address is a fact about ``api/main.py``, and a list here would
+#: be a second copy of it that goes stale the day somebody adds the third one.
+#: There are two today (``login_attempts_by_account`` and ``account_emails``) and
+#: this statement does not know their names.
+#:
+#: ``RETURNING`` rather than a row count, and not for the extra column: an
+#: ``AsyncSession`` types its result as ``Result``, whose ``rowcount`` exists on
+#: the cursor underneath and not in the annotations, so counting the returned rows
+#: is what keeps this honest under ``mypy --strict`` instead of a cast asserting
+#: something the type system cannot see.
+_FORGET: Final = text("""
     DELETE FROM rate_limit_bucket
-    WHERE updated_at < now() - make_interval(secs => :window_seconds)
+    WHERE bucket_key = ANY(:keys)
+    RETURNING scope
 """)
 
 
@@ -107,6 +132,18 @@ _SWEEP: Final = text("""
 #: name. The eight shipped scopes sit well inside it; what runs close is a test
 #: harness prefixing them to keep its buckets apart.
 MAX_SCOPE_LENGTH: Final = 48
+
+#: The longest window any limiter in this application is built with -- an hour, for
+#: the six auth limiters and the calendar feed's two. It is the floor
+#: :func:`sweep_idle_buckets` will accept, because a bucket idle for less than *its
+#: own* window has not refilled to capacity, and deleting it hands its key a fresh
+#: full budget. A sweeper cannot know which scope a row belongs to without
+#: enumerating the policies, so it uses the widest one and is safe for all of them.
+#:
+#: Asserted against every policy the application actually constructs in
+#: ``tests/infra/test_shared_rate_limits.py``: a limiter added tomorrow with a
+#: two-hour window fails the build rather than making the sweep quietly wrong.
+MAX_POLICY_WINDOW_SECONDS: Final = 3600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,13 +266,83 @@ class SharedRateLimiter:
             )
             await connection.execute(_WRITE, {**parameters, "tokens": refilled})
 
-    async def sweep(self) -> int:
-        """Drop buckets idle for a full window. Returns how many rows went."""
-        async with self._engine.begin() as connection:
-            result = await connection.execute(
-                _SWEEP, {"window_seconds": self._policy.window_seconds}
-            )
-        return result.rowcount
-
     def _retry_after(self, tokens: float) -> int:
         return max(1, math.ceil((1.0 - tokens) / self._policy.rate))
+
+
+# --------------------------------------------------------------------------- #
+# Housekeeping over the table, rather than over one limiter
+# --------------------------------------------------------------------------- #
+#
+# Both functions below are deliberately *not* methods on :class:`SharedRateLimiter`.
+# A limiter is one policy over one scope, and neither of these is: the sweep runs
+# across every scope at once -- which is what ``ix_rate_limit_bucket_updated_at``
+# was created for -- and forgetting a key is a data-protection act about a person,
+# who is not a limiter's concern. The earlier ``SharedRateLimiter.sweep()`` had the
+# right SQL on the wrong object, and its only caller in the whole repository was
+# the test that proved it worked.
+
+
+def _check_cutoff(older_than_seconds: float) -> None:
+    if older_than_seconds < MAX_POLICY_WINDOW_SECONDS:
+        raise ValueError(
+            f"a sweep cutoff of {older_than_seconds}s is shorter than the widest "
+            f"limiter window ({MAX_POLICY_WINDOW_SECONDS}s): buckets that have not "
+            f"refilled would be deleted, handing their keys a fresh full budget"
+        )
+
+
+async def count_idle_buckets(connection: AsyncConnection, *, older_than_seconds: float) -> int:
+    """How many buckets :func:`sweep_idle_buckets` would drop, dropping none."""
+    _check_cutoff(older_than_seconds)
+    found = await connection.scalar(_COUNT_IDLE, {"older_than_seconds": older_than_seconds})
+    return int(found or 0)
+
+
+async def sweep_idle_buckets(connection: AsyncConnection, *, older_than_seconds: float) -> int:
+    """Drop every bucket untouched for *older_than_seconds*. Returns how many went.
+
+    Safe by arithmetic rather than by heuristic: a bucket untouched for a full
+    window has refilled to capacity, so deleting it and re-creating it full are the
+    same thing. That argument only holds while the cutoff is at least as wide as
+    the *widest* policy in the application -- a per-hour bucket deleted after a
+    minute has not refilled, and its key gets a second full budget -- so anything
+    below :data:`MAX_POLICY_WINDOW_SECONDS` is refused rather than rounded up. A
+    limiter silently granting twice its advertised rate is precisely the failure
+    the shared buckets exist to prevent.
+
+    Takes a connection rather than an engine, so the caller decides the
+    transaction: ``scripts/purge_retained_data.py`` runs this beside two other
+    sweeps and wants them to commit together or not at all.
+    """
+    _check_cutoff(older_than_seconds)
+    result = await connection.execute(_SWEEP, {"older_than_seconds": older_than_seconds})
+    return result.rowcount
+
+
+async def forget_bucket_keys(session: AsyncSession, keys: Sequence[str]) -> int:
+    """Erase every bucket keyed on one of *keys*, in every scope. Returns the count.
+
+    The one place a bucket is deleted for a reason that is not arithmetic.
+    ``rate_limit_bucket.bucket_key`` holds *"a household id, a client address, or a
+    normalised e-mail"* (``domain/models.py``), and the third of those is personal
+    data with no ``household_id`` and therefore no cascade to reach it: an account
+    erased under article 17 would otherwise leave its address in this table until
+    the periodic sweep happened to run.
+
+    Runs on the caller's session, and that is the point -- the erasure must commit
+    with the account or not at all. It is the one write to this table that does
+    *not* take :class:`SharedRateLimiter`'s own connection, and the reason that rule
+    exists (a count must survive the request's rollback) argues the same way here in
+    reverse: a deletion must **not** survive a rollback that kept the account.
+
+    Deleting a live bucket refunds its key, and for an erased address that is
+    checked rather than shrugged at. Reaching this line means holding the account at
+    that address; obtaining one costs a registration, which is itself capped per
+    client address by a bucket this call cannot reach. So the loop
+    "register, erase, register" is bounded by the registration limiter whether or
+    not these rows survive, and the address stops being retained.
+    """
+    if not keys:
+        return 0
+    return len((await session.execute(_FORGET, {"keys": list(keys)})).all())

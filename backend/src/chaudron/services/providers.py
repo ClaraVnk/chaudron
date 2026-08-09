@@ -174,6 +174,26 @@ class _Refusal:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Where the remedies send the reader
+# --------------------------------------------------------------------------- #
+#
+# Every remedy below that involves editing a configuration names ONE place, and
+# it is named through this constant rather than spelled out five times.
+#
+# It used to read "dans la configuration du foyer". Nothing about that was true
+# of the interface: `frontend/src/features/providers/ProviderConfigPanel.tsx` is
+# mounted by `features/recipes/ProviderSetup.tsx`, which the recipes tab renders
+# -- and the application also has a tab literally called *Foyer*, which is where
+# a reader following that sentence goes and where there is no provider form at
+# all. A remedy that names the wrong screen is worse than one that names none: it
+# spends the reader's trust before it fails them.
+#
+# If the panel is ever also mounted on the household screen -- ProviderSetup's
+# docstring calls that a one-line change -- this constant is the one line of copy
+# that has to move with it.
+_WHERE_TO_CONFIGURE: Final = "l'onglet Recettes"
+
 #: What the receipt import says when nothing is configured at all. Its own
 #: sentence rather than the recipe one, because the two features fail for the same
 #: reason and are fixed on the same screen, but a user who has never asked for a
@@ -181,11 +201,16 @@ class _Refusal:
 NO_PROVIDER_FOR_RECEIPTS: Final = _Refusal(
     code="not_configured",
     reason=(
-        "Aucun fournisseur de modèle n'est configuré pour ce foyer : la photo d'un "
-        "ticket ne peut donc pas être lue."
+        # "utilisable" is load-bearing: the receipt path raises
+        # `ProviderNotConfigured` both for a household that has registered nothing
+        # and for one whose configuration exists but is refused -- a withdrawn
+        # consent, a key the provider rejected. Saying flatly that nothing is
+        # configured would contradict the screen that lists the configuration.
+        "Aucun fournisseur de modèle utilisable n'est configuré pour ce foyer : la "
+        "photo d'un ticket ne peut donc pas être lue."
     ),
     remedy=(
-        "Enregistrez un fournisseur multimodal dans la configuration du foyer, ou "
+        f"Enregistrez un fournisseur multimodal depuis {_WHERE_TO_CONFIGURE}, ou "
         "importez le PDF de votre commande drive, qui se lit sans modèle."
     ),
 )
@@ -193,13 +218,13 @@ NO_PROVIDER_FOR_RECEIPTS: Final = _Refusal(
 _DISABLED: Final = _Refusal(
     code="config_disabled",
     reason="La configuration du fournisseur de ce foyer est désactivée.",
-    remedy="Réactivez-la, ou enregistrez-en une autre.",
+    remedy=f"Réactivez-la depuis {_WHERE_TO_CONFIGURE}, ou enregistrez-en une autre.",
 )
 
 _INVALID_CREDENTIALS: Final = _Refusal(
     code="invalid_credentials",
     reason="Le fournisseur a refusé la clé enregistrée pour ce foyer.",
-    remedy="Remplacez la clé dans la configuration du foyer.",
+    remedy=f"Remplacez la clé depuis {_WHERE_TO_CONFIGURE}.",
 )
 
 _KEY_UNDECRYPTABLE: Final = _Refusal(
@@ -229,7 +254,7 @@ _CONSENT_MISSING: Final = _Refusal(
         "fournisseur de modèle, qui est un tiers."
     ),
     remedy=(
-        "Donnez votre accord dans la configuration du foyer, ou choisissez le mode "
+        f"Donnez votre accord depuis {_WHERE_TO_CONFIGURE}, ou choisissez le mode "
         "Ollama, qui fait tourner le modèle sur votre machine et n'envoie rien."
     ),
 )
@@ -248,7 +273,7 @@ _CONSENT_MISSING_REMOTE_ENDPOINT: Final = _Refusal(
         "publique, donc un tiers les reçoit."
     ),
     remedy=(
-        "Donnez votre accord dans la configuration du foyer, ou indiquez un serveur "
+        f"Donnez votre accord depuis {_WHERE_TO_CONFIGURE}, ou indiquez un serveur "
         "Ollama hébergé sur cette machine ou sur votre réseau local."
     ),
 )
@@ -262,7 +287,7 @@ _CONSENT_REVOKED: Final = _Refusal(
     code="consent_revoked",
     reason=("Ce foyer a retiré son accord pour l'envoi de ses données à ce fournisseur de modèle."),
     remedy=(
-        "Redonnez votre accord dans la configuration du foyer si vous souhaitez "
+        f"Redonnez votre accord depuis {_WHERE_TO_CONFIGURE} si vous souhaitez "
         "réutiliser ce fournisseur."
     ),
 )
@@ -318,10 +343,13 @@ _DEGRADED_REASONS: Final[dict[str, str]] = {
 }
 
 _DEGRADED_REMEDIES: Final[dict[str, str]] = {
-    "vision": "Choisissez un modèle multimodal, puis relancez la détection des capacités.",
+    "vision": (
+        f"Depuis {_WHERE_TO_CONFIGURE}, choisissez un modèle multimodal, puis relancez "
+        "la détection des capacités."
+    ),
     "long_context": (
-        "Choisissez un modèle à plus grande fenêtre de contexte pour que tout le "
-        "stock soit pris en compte."
+        f"Depuis {_WHERE_TO_CONFIGURE}, choisissez un modèle à plus grande fenêtre de "
+        "contexte pour que tout le stock soit pris en compte."
     ),
 }
 

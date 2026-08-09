@@ -677,6 +677,43 @@ class Settings(BaseSettings):
         )
 
     @model_validator(mode="after")
+    def _require_a_password_for_an_authenticated_relay(self) -> Settings:
+        """A username with no password is an authenticated relay that never authenticates.
+
+        This is the loudest place a very quiet failure can be made. Without this
+        check the chain is: ``_drop_blank_values`` turns an unset
+        ``CHAUDRON_SMTP_PASSWORD`` into ``None``; ``infra/email/smtp.py`` gates
+        ``client.login()`` on *both* credentials being present, so it silently
+        skips authentication; the relay answers ``530``/``535`` -- but by then the
+        send is on a worker thread behind a background task, and the caller has
+        long since had its ``202``. Nothing surfaces except one
+        ``smtp_send_failed`` warning naming an exception class, and
+        ``GET /v1/auth/capabilities`` goes on advertising password reset as
+        available. Every reset mail is dropped and the interface says it was sent.
+
+        The deployment made that easy to walk into: ``.env.example`` tells the
+        operator to put the password in the Podman secret
+        ``chaudron-smtp-password``, and until this revision no quadlet mounted it
+        (``ops/chaudron.container``), so following the documentation produced
+        exactly this state.
+
+        Refused at startup rather than repaired, and refused only for the
+        combination that cannot work: a relay with *neither* credential is an
+        anonymous one, which is a normal configuration and is left alone.
+        """
+        if self.smtp_host is None or self.smtp_username is None:
+            return self
+        if self.smtp_password is not None:
+            return self
+        raise ValueError(
+            "CHAUDRON_SMTP_USERNAME is set but CHAUDRON_SMTP_PASSWORD is empty: the relay "
+            "would be contacted without authentication and would reject the message after "
+            "the request had already been answered. Mount the podman secret "
+            "'chaudron-smtp-password' (ops/README.md 2.3), or clear "
+            "CHAUDRON_SMTP_USERNAME for an anonymous relay"
+        )
+
+    @model_validator(mode="after")
     def _require_https_reset_links_in_production(self) -> Settings:
         """A reset link is a bearer credential in a URL; it does not travel in clear.
 

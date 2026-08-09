@@ -209,6 +209,7 @@ async def test_suggestions_are_returned_persisted_and_re_checked_against_the_sto
     # stays zero rather than being derived from a rate card that would go stale.
     assert row.cost_micro == 0
     # What was sent, so a bad suggestion can be explained three months later.
+    assert row.stock_snapshot is not None
     assert [item["name"] for item in row.stock_snapshot["items"]] == ["Crème fraîche épaisse"]
     assert row.stock_snapshot["notes"] == "rapide, sans four"
     assert row.payload["ingredients"][0]["in_stock"] is False, "the corrected flag is stored"
@@ -249,6 +250,7 @@ async def test_location_ids_narrow_the_stock_that_is_sent(
         )
     ).first()
     assert row is not None
+    assert row.stock_snapshot is not None
     assert [item["name"] for item in row.stock_snapshot["items"]] == ["Crème fraîche épaisse"]
     assert row.stock_snapshot["location_ids"] == [fridge]
 

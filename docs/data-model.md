@@ -705,7 +705,7 @@ the full trace of how it was produced (model, prompt, tokens, cost).
 | `servings` | `smallint` NULL | |
 | `prep_minutes` / `cook_minutes` | `smallint` NULL | |
 | `payload` | `jsonb` NOT NULL | complete structured output (steps, utensils…) |
-| `stock_snapshot` | `jsonb` NOT NULL | what was sent to the model |
+| `stock_snapshot` | `jsonb` NULL | what was sent to the model; NULL once the retention job has dropped it |
 | `provider_code` / `model` / `prompt_version` | `varchar(120)` NOT NULL | |
 | `provider_mode` | `llm_provider_mode` NOT NULL | `byok` \| `ollama` \| `instance_owner` |
 | `llm_provider_config_id` | `uuid` NULL, FK → `llm_provider_config(id)` ON DELETE SET NULL | |
@@ -720,7 +720,27 @@ the full trace of how it was produced (model, prompt, tokens, cost).
 
 **`stock_snapshot` frozen**: without it, there is no answering “why did it suggest
 that when I had no eggs”. It is also sensitive data — it is a complete inventory
-of the household — and therefore subject to the same retention as receipts (§11).
+of the household — and `security-model.md` §8.2 gives it the shortest retention in
+the system.
+
+**Nullable since revision `0027`, and NULL means *no longer held*.** It was
+`NOT NULL`, which meant the retention §8.2 demanded was unimplementable: there was
+no way to stop holding a snapshot short of deleting the whole suggestion, and the
+suggestion's title, steps, rating and cost are what make the feature reviewable
+while naming nobody's cupboard. `backend/scripts/purge_retained_data.py` now
+clears the column at thirty days, daily.
+
+It is nullable rather than emptied to `'{}'`: an empty object would have satisfied
+the old constraint and recorded a **fact** — that the household had nothing in
+stock — which the "why did it suggest that?" screen would read back as an answer.
+Revision `0014` refused to invent a registrant and `0016` refused to invent a
+consent date; this is the same trap. The column comment says so in the database,
+where whoever meets a NULL will be.
+
+`ix_recipe_suggestion_snapshot_retention` serves that job and nothing else:
+`(created_at)` partial on `stock_snapshot IS NOT NULL`, so it holds only the rows
+still waiting to be purged and therefore *shrinks as the job works* — the same
+shape, and the same reason, as `ix_rate_limit_bucket_updated_at` (§4.24).
 
 The quartet `provider_mode` / `model` / `prompt_version` / `cost_micro` is not
 decorative: it is what lets you compare two prompts on satisfaction (`rating`)
@@ -1621,6 +1641,25 @@ that behaviour silently.
   window is safe by arithmetic rather than by heuristic, because such a bucket has
   refilled to capacity and re-creating it full is the same thing.
 
+**The sweep has a caller since `purge_retained_data.py`**, and for two years of
+this table's life it had none: the function existed, was tested, and was invoked by
+nothing — no timer, no route, no script. Growth was the smaller half of what that
+cost. `bucket_key` holds **normalised e-mail addresses**, including of people who
+never had an account here, and the table's deliberate absence of a `household_id`
+means no cascade reaches them: a household erasure cannot, and an account erasure
+has to name them explicitly (`infra/rate_limits.py`, `forget_bucket_keys`, called
+by `services/privacy.py` inside the erasing transaction). Everything else is
+bounded by `ops/chaudron-purge-retained-data.timer`, daily.
+
+The cutoff is refused below `MAX_POLICY_WINDOW_SECONDS` rather than clamped. The
+arithmetic argument above only holds while the cutoff is at least as wide as the
+widest policy in the application; below it, a swept bucket has *not* refilled, so
+deleting it hands its key a fresh full budget — and on the sign-in limiter that is
+a password spray with the limit taken off, which is the failure this whole table
+exists to prevent. `tests/infra/test_shared_rate_limits.py` asserts the constant
+against every policy the application actually builds, so a limiter added later with
+a wider window fails the build instead of making the sweep quietly wrong.
+
 **Written outside the request transaction**, on a connection of its own, and that
 is load-bearing rather than incidental: a count that rolled back with the request
 would count only the attempts that *succeeded*, so anyone able to make a request
@@ -2314,7 +2353,14 @@ for them; the defaults settled on are `CHF` and `UTC`)
    status quo?
 5. **Retention**: how long do we keep receipt images, `raw_response`, and above
    all `stock_snapshot` (a complete inventory of the home)? An answer is needed
-   before accepting the first third-party account, not after.
+   before accepting the first third-party account, not after. — **`stock_snapshot`
+   is settled enough to ship**: revision `0027` made the column clearable and
+   `purge_retained_data.py` clears it at the thirty days `security-model.md` §8.4
+   proposes, with the period on a flag. The *number* is still the operator's to
+   arbitrate; what is no longer open is whether the column has a retention at all.
+   `receipt.raw_response` and the images are untouched — this build stores no
+   image (revision `0012`), so of the three only `raw_response` is genuinely still
+   unbounded.
 6. **Governance of the public catalogue**: who may correct a shared `product`?
    Does an OFF resynchronisation overwrite a local correction? Without an answer,
    the first useful correction will be overwritten by the next job.

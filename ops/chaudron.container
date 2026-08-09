@@ -160,6 +160,32 @@ Secret=chaudron-secret-key,type=env,target=CHAUDRON_SECRET_KEY
 # into any household.
 Secret=chaudron-inbound-email-key,type=env,target=CHAUDRON_INBOUND_EMAIL_WEBHOOK_KEY
 
+# Outbound relay password, for an authenticated SMTP relay ONLY.
+#
+# Commented out because outbound mail is optional — leave CHAUDRON_SMTP_HOST
+# empty and there is no password to mount. A `Secret=` naming a secret that does
+# not exist is a start-up failure, so this follows the same convention as the
+# provider keys below: uncomment the line you actually use.
+#
+# UNCOMMENT IT whenever you set CHAUDRON_SMTP_USERNAME. `.env.example` has always
+# told the operator to create `chaudron-smtp-password` and no unit ever mounted
+# it, which left the password with nowhere to go but `chaudron.env` — the plain
+# file in $HOME that the block above exists to keep secrets out of. The other
+# outcome was worse because it looked like success: with the secret unmounted,
+# CHAUDRON_SMTP_PASSWORD is empty, and an empty value is dropped to `None` before
+# any validator sees it (`config.py::_drop_blank_values`).
+#
+# That silence is closed at the other end too. A username with no password is now
+# refused at startup (`config.py::_require_a_password_for_an_authenticated_relay`)
+# rather than skipping SMTP AUTH and having the relay reject the message on a
+# worker thread, after the caller had already been told `202`. So the failure is
+# now a container that will not start and says why — which is what this comment
+# is for.
+#
+#   read -rs -p 'SMTP relay password: ' V && printf '%s' "$V" | podman secret create chaudron-smtp-password - && unset V
+#
+#Secret=chaudron-smtp-password,type=env,target=CHAUDRON_SMTP_PASSWORD
+
 # Provider keys for `instance_owner` mode ONLY — used by the operator's own
 # household, never shared with other households (see ADR-0007). Create only the
 # ones you actually use; a missing secret is a start-up failure, so comment out
@@ -184,8 +210,22 @@ Secret=chaudron-anthropic-api-key,type=env,target=ANTHROPIC_API_KEY
 # trap" in `ops/README.md` before adding it.
 
 # Liveness probe. /healthz answers without touching PostgreSQL, so a database
-# outage does not restart the API. Readiness (/readyz, which does check the
-# database) is polled by the reverse proxy and by deployment gates.
+# outage does not restart the API.
+#
+# This is the ONLY probe wired into anything. The line here used to say readiness
+# was "polled by the reverse proxy and by deployment gates", and neither was
+# true: ops/Caddyfile.example routes /readyz to this container but sets no
+# `health_uri`, so Caddy never calls it, and verified-auto-update.sh waits on
+# `podman inspect`'s health status — which is THIS command. So /readyz is
+# available to whoever curls it and gates nothing on its own.
+#
+# Do NOT "fix" that by pointing HealthCmd at /readyz. This probe decides whether
+# the container is restarted, and /readyz reports on PostgreSQL: a database blip
+# would become a restart loop, which is the exact failure the split exists to
+# prevent. Wiring readiness in belongs in the two places that can act on it
+# without restarting anything — a `health_uri /readyz` on the proxy's
+# reverse_proxy block, and a post-restart readiness wait in the update gate. Both
+# are recommended in ops/README.md 5.4 and neither is installed yet.
 #
 # Quoting matters here, and not cosmetically. Quadlet strips a double quote that
 # ends the value, so `python -c "…"` was generated as

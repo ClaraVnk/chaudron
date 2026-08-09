@@ -1,0 +1,122 @@
+# One-shot retention sweep: rate-limit buckets and stock snapshots (rootless).
+#
+# Install to:  ~/.config/containers/systemd/chaudron-purge-retained-data.container
+# Paired with: chaudron-purge-retained-data.timer
+# Script:      backend/scripts/purge_retained_data.py
+# Inspect:     journalctl --user -u chaudron-purge-retained-data.service
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS EXISTS FOR
+# ---------------------------------------------------------------------------
+# Two tables hold personal data for longer than anything needs it, and until this
+# unit existed nothing removed either.
+#
+# `rate_limit_bucket` keys its rows on "a household id, a client address, or a
+# normalised e-mail". The e-mail ones include addresses of people who never had
+# an account here — every address typed into the sign-in form, every address a
+# stranger asked a reset link for. The table carries no household_id by design
+# (revision 0018), so no cascade reaches those rows and no erasure can. Revision
+# 0018's own index comment said what happens without a sweep: "the table grows one
+# row per distinct client address, for ever". The sweep was written and nothing
+# ever called it.
+#
+# `recipe_suggestion.stock_snapshot` is a household's complete inventory, frozen
+# in JSONB, and it was sent to a model provider. security-model.md §8.2 says it
+# must carry "the shortest retention period in the system"; it had none, because
+# the column was NOT NULL until revision 0027 made it clearable.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS IS A SECOND UNIT AND NOT TWO MORE LINES IN THE CREDENTIAL PURGE
+# ---------------------------------------------------------------------------
+# Cadence, and only cadence. chaudron-purge-credentials sweeps rows thirty days
+# after they stop authenticating anybody: weekly is generous for that, and its
+# timer argues the point. What this unit removes has a useful life of *one hour* —
+# the widest rate-limiter window — so a weekly run would leave somebody's e-mail
+# address in the database six days longer than any limiter needs it. One service
+# cannot have two cadences. Everything else here is copied from that unit rather
+# than reinvented: same image, same identity, same shape.
+#
+# ---------------------------------------------------------------------------
+# WHY IT USES THE OWNER DSN, LIKE THE MIGRATION UNIT AND UNLIKE THE API
+# ---------------------------------------------------------------------------
+# `recipe_suggestion` is under row-level security keyed on a transaction-local
+# tenant (revision 0004). A retention sweep is by definition not scoped to one
+# household, so the application role would post no tenant, match no row, and
+# report that it cleared nothing — silently, with an exit code of 0. This unit
+# therefore takes `chaudron-database-url-owner`, the same secret
+# chaudron-migrate.container and chaudron-purge-credentials.container take.
+#
+# That is a privilege, so the work is deliberately narrow: one UPDATE that writes
+# NULL over one column, and one DELETE over an indexed predicate, in one
+# transaction. It creates nothing, drops nothing, and touches no other column.
+#
+# ---------------------------------------------------------------------------
+# RETENTION
+# ---------------------------------------------------------------------------
+# `--snapshot-days 30` — the period security-model.md §8.4 *proposes* for this
+# column. That table is explicitly "proposals to be arbitrated, not decisions",
+# and arbitrating it is the operator's call, not the software's; what is not
+# arbitrable is that "for ever" is the wrong answer. The flag is where you change
+# it. Shortening it costs the "why did it suggest that?" screen its explanation
+# for older suggestions and costs nothing else.
+#
+# `--bucket-idle-hours 24` — against a widest limiter window of one hour. The
+# extra twenty-three buy the certainty that no clock skew and no future limiter
+# with a wider window can make the sweep hand a key a fresh budget. Anything below
+# one hour is refused by the script rather than rounded up, because deleting a
+# bucket that has not refilled *is* a refund — and on the sign-in limiter, a
+# refund is a password spray with the limit removed.
+#
+# Run it once by hand with `--dry-run` before enabling the timer:
+#   podman exec chaudron python scripts/purge_retained_data.py --dry-run
+# A first run that reports a number you did not expect is worth reading before it
+# is a write.
+
+[Unit]
+Description=Chaudron — sweep data held past its retention
+Documentation=https://github.com/ClaraVnk/chaudron
+After=chaudron-db.service
+Requires=chaudron-db.service
+
+[Container]
+ContainerName=chaudron-purge-retained-data
+Image=ghcr.io/claravnk/chaudron:latest
+Network=chaudron-net
+
+Exec=python scripts/purge_retained_data.py --snapshot-days 30 --bucket-idle-hours 24
+
+EnvironmentFile=%h/chaudron/chaudron.env
+
+# The owner's DSN. See the note above for why this unit needs it and why the
+# API's role would silently do nothing.
+Secret=chaudron-database-url-owner,type=env,target=CHAUDRON_DATABASE_URL
+
+NoNewPrivileges=true
+DropCapability=ALL
+ReadOnly=true
+Tmpfs=/tmp:rw,size=32M,mode=1777
+
+LogDriver=journald
+
+# One UPDATE and one DELETE, both over indexed predicates — the snapshot one over
+# a partial index that holds only the rows still waiting to be purged. If this
+# needs more than a few seconds of CPU, something has grown far past what this
+# timer was meant to prevent, which is a thing to look at rather than a limit to
+# raise.
+PodmanArgs=--memory=256m --pids-limit=64
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# A failed sweep is not an emergency: tomorrow's run does the same work. Retrying
+# against a database in an unknown state is how a cleanup job becomes an outage.
+Restart=no
+TimeoutStartSec=300
+
+MemoryHigh=192M
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=64
+IOSchedulingClass=idle
+
+# Deliberately no [Install]: the timer pulls this in.

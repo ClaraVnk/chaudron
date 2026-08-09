@@ -25,14 +25,23 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import fields
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from chaudron.api.main import build_throttles
+from chaudron.api.routers import calendar as calendar_module
 from chaudron.api.throttling import AtCapacityError
 from chaudron.infra.db import Database
-from chaudron.infra.rate_limits import BucketPolicy, SharedRateLimiter
+from chaudron.infra.rate_limits import (
+    MAX_POLICY_WINDOW_SECONDS,
+    BucketPolicy,
+    SharedRateLimiter,
+    count_idle_buckets,
+    sweep_idle_buckets,
+)
 from tests.conftest import build_test_settings
 
 pytestmark = pytest.mark.anyio
@@ -274,12 +283,84 @@ async def test_the_sweep_drops_only_buckets_idle_for_a_whole_window(engine: Asyn
 
     await limiter.acquire(idle)
     await limiter.acquire(busy)
-    await _backdate(engine, policy.scope, idle, 120)
+    await _backdate(engine, policy.scope, idle, MAX_POLICY_WINDOW_SECONDS * 2)
 
-    await limiter.sweep()
+    async with engine.begin() as connection:
+        swept = await sweep_idle_buckets(connection, older_than_seconds=MAX_POLICY_WINDOW_SECONDS)
 
+    assert swept >= 1
     assert await _tokens(engine, policy.scope, idle) is None
     assert await _tokens(engine, policy.scope, busy) is not None
+
+
+async def test_the_dry_run_counts_exactly_what_the_sweep_would_take(engine: AsyncEngine) -> None:
+    """``--dry-run`` is only worth having while the two predicates are one.
+
+    ``scripts/purge_retained_data.py`` reports before it deletes, and a counter
+    using a slightly different clause would make that report reassuring and wrong
+    -- the failure ``tests/test_credential_purge.py`` names for the other sweep in
+    this codebase. Here the clause is written once and shared, and this is what
+    holds it to that.
+    """
+    policy = BucketPolicy(scope="test-sweep-dry-run", limit=2, window_seconds=60)
+    limiter = SharedRateLimiter(engine, policy)
+    idle = _unique_key()
+
+    await limiter.acquire(idle)
+    await _backdate(engine, policy.scope, idle, MAX_POLICY_WINDOW_SECONDS * 2)
+
+    async with engine.connect() as connection:
+        predicted = await count_idle_buckets(
+            connection, older_than_seconds=MAX_POLICY_WINDOW_SECONDS
+        )
+    # Counting is not deleting.
+    assert await _tokens(engine, policy.scope, idle) is not None
+
+    async with engine.begin() as connection:
+        swept = await sweep_idle_buckets(connection, older_than_seconds=MAX_POLICY_WINDOW_SECONDS)
+
+    assert swept == predicted >= 1
+
+
+async def test_a_cutoff_below_the_widest_window_is_refused(engine: AsyncEngine) -> None:
+    """The one way a sweep stops being free and starts granting budget.
+
+    A bucket deleted before its own window has elapsed has *not* refilled to
+    capacity, so re-creating it full hands its key tokens it had already spent. On
+    the sign-in limiter that is a password spray with the limit removed, which is
+    the failure the shared buckets exist to prevent -- so a cutoff that cannot be
+    justified by the arithmetic is refused rather than quietly rounded up.
+    """
+    async with engine.connect() as connection:
+        with pytest.raises(ValueError, match="widest limiter window"):
+            await sweep_idle_buckets(connection, older_than_seconds=MAX_POLICY_WINDOW_SECONDS - 1)
+
+
+def test_no_limiter_is_built_wider_than_the_sweep_assumes() -> None:
+    """The constant the sweep's safety rests on, checked against the real policies.
+
+    :data:`MAX_POLICY_WINDOW_SECONDS` is a claim about every ``BucketPolicy`` this
+    application constructs, and a claim in a comment is one that goes stale in
+    silence: a limiter added tomorrow with a two-hour window would make every sweep
+    at the documented cutoff refund half its buckets, and nothing would say so. So
+    the claim is asserted against the policies themselves -- the ten on
+    :class:`Throttles`, plus the calendar feed's two, which ``routers/calendar.py``
+    builds for itself and which are therefore easy to forget.
+    """
+    # `create_async_engine` opens nothing until something asks it to, and
+    # `build_throttles` only stores it -- so this reads the real policies without a
+    # database, which is what lets the guard run in the unit pass.
+    url = "postgresql+asyncpg://unused:unused@localhost/unused"
+    throttles = build_throttles(build_test_settings(url), create_async_engine(url))
+    built = [
+        limiter.policy.window_seconds
+        for field in fields(throttles)
+        if isinstance(limiter := getattr(throttles, field.name), SharedRateLimiter)
+    ]
+    assert built, "no shared limiter found on Throttles; this guard would pass vacuously"
+
+    assert max(built) <= MAX_POLICY_WINDOW_SECONDS
+    assert calendar_module._HOUR <= MAX_POLICY_WINDOW_SECONDS
 
 
 async def test_scopes_do_not_share_a_budget(engine: AsyncEngine) -> None:

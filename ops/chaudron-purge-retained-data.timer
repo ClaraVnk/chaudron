@@ -1,0 +1,49 @@
+# Chaudron — daily sweep of data held past its retention.
+#
+# Install to:  ~chaudron/.config/systemd/user/chaudron-purge-retained-data.timer
+# Then:        systemctl --user daemon-reload
+#              systemctl --user enable --now chaudron-purge-retained-data.timer
+# Verify:      systemctl --user list-timers chaudron-purge-retained-data.timer
+#
+# Daily, where chaudron-purge-credentials.timer is weekly, and the difference is
+# the whole reason there are two units rather than one service with three sweeps.
+#
+# What that timer prevents is unbounded growth over years, against a thirty-day
+# retention: "eventually and reliably" is the property that matters, and running
+# it more often would make the window look shorter than it is in the journal.
+#
+# What *this* one bounds is how long a personal e-mail address sits in
+# `rate_limit_bucket` after its last use. The widest limiter window is an hour, so
+# every one of those rows is arithmetically dead within an hour of being written
+# — and the cadence, not the retention flag, is what decides whether it is then
+# removed in a day or in a week. A daily run bounds it at roughly twenty-five
+# hours. That is the honest number: it is not "an hour", and tightening it means
+# tightening this line rather than the script.
+#
+# Hourly was considered and is available — change OnCalendar to `hourly` and the
+# residency drops to about two hours. It was not made the default because it turns
+# one journal entry a day into twenty-four, and the difference between a day and
+# an hour is not the difference between compliant and not; the difference between
+# a week and never is.
+
+[Unit]
+Description=Chaudron — daily retention sweep
+Documentation=https://github.com/ClaraVnk/chaudron
+
+[Timer]
+Unit=chaudron-purge-retained-data.service
+
+# 04:10 local, ahead of the 04:40 credential sweep on Sundays and after the 03:20
+# backup on every day. That ordering is the point of the hour, not the hour
+# itself: the night's dump still contains what this is about to remove, and the
+# two sweeps never contend for the same connection.
+OnCalendar=*-*-* 04:10:00
+
+RandomizedDelaySec=15min
+
+# Run on next boot if the machine was off. A self-hosted instance that sleeps at
+# night would otherwise never sweep at all.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

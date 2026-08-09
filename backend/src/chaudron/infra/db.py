@@ -248,6 +248,20 @@ _CONNECTING_ROLE = text(
     """
 )
 
+#: Whether this database has ever been migrated at all. Asked *before* the table
+#: is referenced, and that ordering is the whole point: PostgreSQL resolves table
+#: names when it parses a statement, so a `WHERE to_regclass(...) IS NOT NULL`
+#: guard inside the select would still raise `UndefinedTable` -- and an aborted
+#: transaction makes "never migrated" indistinguishable from "the database is
+#: broken", which are the two answers the probe most needs to keep apart.
+_SCHEMA_VERSION_TABLE_EXISTS = text("SELECT to_regclass('alembic_version') IS NOT NULL")
+
+#: The revision Alembic has stamped here. Every row, not `LIMIT 1`: Alembic
+#: stamps one row per head, so more than one means a branched history this build
+#: cannot reason about -- a fact the caller has to see rather than one a `LIMIT`
+#: would silently resolve by picking whichever came back first.
+_SCHEMA_REVISION = text("SELECT version_num FROM alembic_version")
+
 
 #: The rate limiters' own pool. Deliberately fixed rather than configurable: it
 #: is not a capacity dial but a decoupling, and the number that matters is that
@@ -368,6 +382,34 @@ class Database:
             tables_without_policies=tuple(unprotected),
             tables_owned_by_this_role=tuple(owned),
         )
+
+    async def current_schema_revision(self) -> str | None:
+        """The Alembic revision stamped on this database, or ``None`` if unreadable.
+
+        ``None`` covers all three ways there is no single answer -- no
+        ``alembic_version`` table, no row in it, or several rows -- because they
+        are one fact to the caller: *this build cannot establish which schema it
+        is talking to*. :func:`chaudron.infra.schema_revision.classify_schema_revision`
+        turns that into the ``unknown`` status ``/readyz`` publishes, which is on
+        the refusing side.
+
+        Two statements rather than one, and no exception handling: the existence
+        check has to precede the reference for the reason given on
+        :data:`_SCHEMA_VERSION_TABLE_EXISTS`. Both are trivial -- a catalogue
+        lookup and a single-row read -- which is what keeps this affordable on an
+        endpoint that is polled.
+
+        Errors are *not* swallowed here. A refused connection or a missing SELECT
+        grant is the caller's to interpret, and ``/readyz`` already has the
+        ``except`` clause that turns a database it cannot reach into ``503``.
+        Catching them here would report a connection failure as ``unknown``
+        migrations, which sends the operator to the wrong runbook section.
+        """
+        async with self._engine.connect() as connection:
+            if not await connection.scalar(_SCHEMA_VERSION_TABLE_EXISTS):
+                return None
+            stamped = (await connection.scalars(_SCHEMA_REVISION)).all()
+        return str(stamped[0]) if len(stamped) == 1 else None
 
     async def dispose(self) -> None:
         await self._engine.dispose()

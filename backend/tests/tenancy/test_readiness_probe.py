@@ -1,4 +1,13 @@
-"""The row-level security probe, and the two places that now act on its answer.
+"""What ``/readyz`` refuses, and the two places that now act on its answer.
+
+Two controls, tested together because one endpoint publishes both: row-level
+security, below, and the schema revision, under "The schema revision" — the
+latter added after an audit found ``ops/README.md`` §1.6 describing this probe as
+"database reachable, migrations applied" while nothing in it looked at a
+migration. Those tests point a real application at a real database stamped at the
+wrong revision rather than at a stubbed classifier, because the query was the
+part that did not exist.
+
 
 ``Database.check_row_level_security`` was written for a readiness probe and then
 called by nobody, which made it a comment with a docstring. This file is what
@@ -23,6 +32,9 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 from pydantic import SecretStr
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from chaudron.api.main import (
     RowLevelSecurityNotEnforcedError,
@@ -31,6 +43,7 @@ from chaudron.api.main import (
 )
 from chaudron.config import Settings
 from chaudron.infra.db import Database
+from chaudron.infra.schema_revision import REQUIRED_SCHEMA_REVISION
 from tests.conftest import build_test_settings
 
 pytestmark = pytest.mark.integration
@@ -53,6 +66,49 @@ async def _database(database_url: str, *, production: bool = False) -> AsyncIter
         yield database
     finally:
         await database.dispose()
+
+
+@asynccontextmanager
+async def _stamped_at(database_url: str, revision: str | None) -> AsyncIterator[None]:
+    """Rewrite ``alembic_version`` for the body of the block, then put it back.
+
+    The probe reads exactly one row of one table, so rewriting that row is the
+    whole of "point it at a database at the wrong revision" -- and it is
+    reversible, which downgrading the real schema is not. The suite shares one
+    migrated database across the session (``initialised_database``), so the
+    restore in ``finally`` is not tidiness: without it every later test in the
+    run would see the tampered stamp.
+
+    ``revision=None`` empties the table instead, which is one of the three ways
+    :meth:`Database.current_schema_revision` reports ``None``.
+
+    Connects as the **owner**: ``alembic_version`` belongs to it, and this is
+    test scaffolding rather than something the application does.
+    """
+    engine = create_async_engine(database_url, poolclass=NullPool)
+    try:
+        async with engine.begin() as connection:
+            original = (
+                await connection.scalars(text("SELECT version_num FROM alembic_version"))
+            ).all()
+            await connection.execute(text("DELETE FROM alembic_version"))
+            if revision is not None:
+                await connection.execute(
+                    text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+                    {"revision": revision},
+                )
+        try:
+            yield
+        finally:
+            async with engine.begin() as connection:
+                await connection.execute(text("DELETE FROM alembic_version"))
+                for stamp in original:
+                    await connection.execute(
+                        text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+                        {"revision": stamp},
+                    )
+    finally:
+        await engine.dispose()
 
 
 async def _readyz(settings: Settings) -> httpx.Response:
@@ -115,7 +171,7 @@ async def test_readyz_reports_the_policies_as_in_force(app_role_url: str) -> Non
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "checks": {"database": "ok", "row_level_security": "enforced"},
+        "checks": {"database": "ok", "row_level_security": "enforced", "migrations": "ok"},
     }
 
 
@@ -140,7 +196,7 @@ async def test_readyz_refuses_readiness_in_production_when_the_policies_are_bypa
     assert response.status_code == 503
     assert response.json() == {
         "status": "degraded",
-        "checks": {"database": "ok", "row_level_security": "bypassed"},
+        "checks": {"database": "ok", "row_level_security": "bypassed", "migrations": "ok"},
     }
 
 
@@ -162,7 +218,7 @@ async def test_readyz_refuses_readiness_in_staging_when_the_policies_are_bypasse
     assert response.status_code == 503
     assert response.json() == {
         "status": "degraded",
-        "checks": {"database": "ok", "row_level_security": "bypassed"},
+        "checks": {"database": "ok", "row_level_security": "bypassed", "migrations": "ok"},
     }
 
 
@@ -216,6 +272,141 @@ async def test_readyz_says_nothing_about_roles_or_tables(initialised_database: s
     body = response.text
     assert "postgres" not in body
     assert "inventory_lot" not in body
+
+
+# --------------------------------------------------------------------------- #
+# The schema revision
+# --------------------------------------------------------------------------- #
+#
+# `ops/README.md` §1.6 described `/readyz` as "database reachable, migrations
+# applied" from the day the endpoint existed, and only the first half was true.
+# These exercise the second half against a real database whose `alembic_version`
+# says something other than what this build needs -- not against a stubbed
+# classifier, because the thing that was missing was the query.
+
+
+async def test_the_migrated_database_reports_the_revision_this_build_needs(
+    initialised_database: str,
+) -> None:
+    """The floor under every assertion below: the fixture really is at head."""
+    async with _database(initialised_database) as database:
+        assert await database.current_schema_revision() == REQUIRED_SCHEMA_REVISION
+
+
+async def test_the_application_role_can_read_the_stamp(app_role_url: str) -> None:
+    """Not a formality. The probe runs as the *application* role in production.
+
+    `provision_app_role.py` grants `SELECT ... ON ALL TABLES IN SCHEMA public`,
+    which covers `alembic_version` because §6.1 applies the migration before
+    creating the role. If that ordering ever changed, this check would answer
+    `unknown` on every poll and no production instance would ever become ready --
+    a fail-closed that takes the whole deployment with it. So it is asserted.
+    """
+    async with _database(app_role_url) as database:
+        assert await database.current_schema_revision() == REQUIRED_SCHEMA_REVISION
+
+
+async def test_readyz_refuses_a_schema_behind_this_build(app_role_url: str) -> None:
+    """New code, old schema -- the deploy that used to answer `200 ready`.
+
+    Stamped at the first revision in the chain, which is as far behind as this
+    database can be while still having been migrated at all.
+    """
+    async with _stamped_at(app_role_url, "0001"):
+        response = await _readyz(_settings(app_role_url))
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "checks": {
+            "database": "ok",
+            "row_level_security": "enforced",
+            "migrations": "outdated",
+        },
+    }
+
+
+async def test_readyz_serves_a_schema_ahead_of_this_build(app_role_url: str) -> None:
+    """The expand phase of §5.4, which is a supported state and not a fault.
+
+    The migration has landed and this process has not been replaced yet. Refusing
+    here would take a healthy instance out of service in the middle of the
+    procedure the runbook prescribes.
+    """
+    async with _stamped_at(app_role_url, "9999_not_yet_written"):
+        response = await _readyz(_settings(app_role_url))
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["migrations"] == "ahead"
+
+
+async def test_readyz_refuses_a_database_that_was_never_migrated(app_role_url: str) -> None:
+    """ "Cannot tell" fails closed, and says something different from "outdated".
+
+    The two send an operator to different steps: one has not run the migration at
+    all, the other deployed ahead of it.
+    """
+    async with _stamped_at(app_role_url, None):
+        response = await _readyz(_settings(app_role_url))
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["migrations"] == "unknown"
+
+
+async def test_readyz_refuses_a_branched_history(app_role_url: str) -> None:
+    """Two stamped heads is not an answer, so it is not treated as one."""
+    engine = create_async_engine(app_role_url, poolclass=NullPool)
+    try:
+        async with _stamped_at(app_role_url, REQUIRED_SCHEMA_REVISION):
+            async with _database(app_role_url) as database:
+                # A second head, added on top of the one `_stamped_at` installed.
+                # Restored with the rest when the block exits.
+                async with database.engine.begin() as connection:
+                    await connection.execute(
+                        text("INSERT INTO alembic_version (version_num) VALUES ('0001')")
+                    )
+                assert await database.current_schema_revision() is None
+            response = await _readyz(_settings(app_role_url))
+    finally:
+        await engine.dispose()
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["migrations"] == "unknown"
+
+
+async def test_a_stale_schema_is_refused_even_where_the_bypass_is_excused(
+    initialised_database: str,
+) -> None:
+    """`local` and `ci` are excused the RLS bypass. They are not excused this.
+
+    The two exemptions exist because those environments connect as the table
+    owner *on purpose*. Nothing makes running this code against a schema it
+    predates intentional anywhere, so the schema check has no exemption list --
+    and a developer who has not run `alembic upgrade head` is told so.
+    """
+    async with _stamped_at(initialised_database, "0001"):
+        response = await _readyz(_settings(initialised_database, env="local"))
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "checks": {
+            "database": "ok",
+            "row_level_security": "bypassed",
+            "migrations": "outdated",
+        },
+    }
+
+
+async def test_readyz_does_not_claim_a_schema_verdict_when_the_database_is_unreachable() -> None:
+    """One fault, one line. `database: unavailable` says all there is to say."""
+    settings = build_test_settings("postgresql+asyncpg://nobody@127.0.0.1:1/none").model_copy(
+        update={"database_url": SecretStr("postgresql+asyncpg://nobody@127.0.0.1:1/none")}
+    )
+    response = await _readyz(settings)
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "degraded", "checks": {"database": "unavailable"}}
 
 
 # --------------------------------------------------------------------------- #
