@@ -185,6 +185,33 @@ class Throttles:
     #: Account creations per source address.
     registrations: SharedRateLimiter
 
+    # -- Password reset ----------------------------------------------------- #
+    #
+    # Three limiters for one feature, and each guards a different party.
+    #
+    # The first two guard the *instance* and the account, on the pattern above:
+    # per source address, so one host cannot walk a list of addresses; per
+    # attempt, so consuming a link is not free.
+    #
+    # The third guards a **third party**, and it is the one this feature could not
+    # ship without. Every other limiter in this class bounds what a caller spends
+    # of ours; this one bounds what a caller can put in somebody else's inbox. An
+    # unbounded reset form is a mail bomb aimed at any address the attacker knows,
+    # sent from a server the victim trusts -- and it is *our* relay's reputation
+    # that pays. It is keyed on the normalised address and charged **whether or
+    # not that address has an account**, for the reason
+    # ``login_attempts_by_account`` gives: a counter that ticks only for real
+    # accounts answers, through its own behaviour, the question the endpoint
+    # refuses to answer.
+
+    #: Reset requests per source address.
+    password_reset_requests: SharedRateLimiter
+    #: Reset completions -- links actually followed -- per source address.
+    password_reset_attempts: SharedRateLimiter
+    #: Messages sent to one address per hour, across registration notices and
+    #: reset requests alike. Keyed on the recipient, not on the sender.
+    account_emails: SharedRateLimiter
+
     #: Machine tokens that were **rejected**, per source address. The fourth
     #: limiter guarding an unauthenticated endpoint, and the note above applies
     #: to it in full. Only failures are charged: a running integration presents

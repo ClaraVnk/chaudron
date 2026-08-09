@@ -288,6 +288,16 @@ class InventoryItem:
     unit: str | None = None
     #: Negative for something already past its date; ``None`` when unknown.
     expires_in_days: int | None = None
+    #: Currently in the household's freezer -- frozen and not since thawed.
+    #:
+    #: It is stock, and it is deliberately *not* removed from the inventory: a
+    #: household with a full freezer and an empty fridge would otherwise be told
+    #: it owns nothing. What it is not is available tonight, and the difference
+    #: is a whole evening. The flag travels so the model can plan a thaw rather
+    #: than write a twenty-minute recipe around a block of ice; the rule it must
+    #: never be asked to enforce -- that thawed food is not refrozen -- is a
+    #: refusal in ``services/inventory.py``, where it cannot be talked out of.
+    frozen: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,11 +10,14 @@ from typing import Any, Final
 from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from chaudron.domain.models import (
+    FoodFamily,
     InventoryLot,
     Product,
     QuantityDimension,
+    ShelfLifeGuideline,
     StockMovement,
     StockMovementKind,
     StorageLocation,
@@ -28,6 +31,7 @@ from chaudron.domain.ports import (
     InventoryPage,
     LocationView,
     LotDraft,
+    LotFreezingState,
     LotState,
     LotUpdate,
     ProductView,
@@ -37,6 +41,12 @@ from chaudron.domain.shelf_life import effective_expiry_sql, join_shelf_life_gui
 #: Label the computed column carries, so ``_row_to_item`` reads it by name rather
 #: than by position.
 _EFFECTIVE_EXPIRY: Final = "effective_expiry"
+
+#: Label the guideline's freezing advice carries. Selected as a bare column rather
+#: than by mapping the whole ``ShelfLifeGuideline`` entity: the join is a ``LEFT``
+#: one, so there is frequently no row, and a projection of one column keeps the
+#: "no family, no advice" case a ``None`` instead of a missing object.
+_FREEZING_NOTE: Final = "freezing_note"
 
 
 def _row_to_item(row: Any) -> InventoryItem:
@@ -68,6 +78,9 @@ def _row_to_item(row: Any) -> InventoryItem:
         effective_expiry=getattr(row, _EFFECTIVE_EXPIRY),
         entry_source=lot.entry_source,
         created_at=lot.created_at,
+        frozen_at=lot.frozen_at,
+        thawed_at=lot.thawed_at,
+        freezing_note=getattr(row, _FREEZING_NOTE),
     )
 
 
@@ -84,6 +97,10 @@ class SqlInventoryRepository:
                 Product,
                 StorageLocation,
                 effective_expiry_sql().label(_EFFECTIVE_EXPIRY),
+                # Free: ``join_shelf_life_guideline`` already brought the row in
+                # for ``effective_expiry_sql``, so the advice costs one more
+                # column on a join the listing was paying for anyway.
+                ShelfLifeGuideline.freezing_note.label(_FREEZING_NOTE),
             )
             .join(Product, Product.id == InventoryLot.product_id)
             .outerjoin(StorageLocation, StorageLocation.id == InventoryLot.storage_location_id)
@@ -161,6 +178,101 @@ class SqlInventoryRepository:
         )
         return None if lot is None else _to_state(lot)
 
+    async def get_freezing_state(
+        self, household_id: uuid.UUID, item_id: uuid.UUID
+    ) -> LotFreezingState | None:
+        """The lot, its computed date, and its family's freezing figures, locked.
+
+        Two properties of this query are load-bearing.
+
+        *The date is read, not recomputed.* ``effective_expiry_sql`` is the same
+        expression the listing sorts on and the ``expiring_within_days`` filter
+        compares against, so "this lot is already expired" cannot mean one thing
+        to the freeze refusal and another to the screen the user was looking at
+        when they tapped it.
+
+        *``with_for_update(of=...)`` names the lot.* The statement joins two
+        tables the writer never touches, and PostgreSQL refuses ``FOR UPDATE`` on
+        the nullable side of an outer join outright. Locking the lot row alone is
+        also the correct scope: ``shelf_life_guideline`` is published reference
+        data, and taking a row lock on it would serialise every household that
+        happens to be freezing meat at the same moment.
+        """
+        row = (
+            await self._session.execute(
+                join_shelf_life_guideline(
+                    select(
+                        InventoryLot,
+                        Product.food_family,
+                        ShelfLifeGuideline.home_frozen_days,
+                        ShelfLifeGuideline.freezing_note,
+                        effective_expiry_sql().label(_EFFECTIVE_EXPIRY),
+                    ).join(Product, Product.id == InventoryLot.product_id)
+                )
+                .where(
+                    InventoryLot.id == item_id,
+                    InventoryLot.household_id == household_id,
+                    InventoryLot.depleted_at.is_(None),
+                )
+                .with_for_update(of=InventoryLot)
+            )
+        ).first()
+        if row is None:
+            return None
+        lot: InventoryLot = row.InventoryLot
+        return LotFreezingState(
+            id=lot.id,
+            product_id=lot.product_id,
+            storage_location_id=lot.storage_location_id,
+            frozen_at=lot.frozen_at,
+            thawed_at=lot.thawed_at,
+            effective_expiry=getattr(row, _EFFECTIVE_EXPIRY),
+            home_frozen_days=row.home_frozen_days,
+            freezing_note=row.freezing_note,
+            sold_frozen=row.food_family is FoodFamily.FROZEN,
+        )
+
+    async def location_holds_twin(
+        self, household_id: uuid.UUID, item_id: uuid.UUID, location_id: uuid.UUID
+    ) -> bool:
+        """Whether moving this lot to ``location_id`` would collide with the merge key.
+
+        ``uq_inventory_lot_merge_key`` is ``(household, product, location,
+        best_before, dimension)`` over active rows, so a *move* can violate it
+        exactly as an insert can -- and it is not a hypothetical: freeze one pack
+        of chicken on Monday, buy another with the same printed date on Tuesday,
+        and Wednesday's freeze would land on top of Monday's row.
+
+        Asked in advance rather than caught afterwards, because the caught version
+        is worse in both directions: an ``IntegrityError`` aborts the request's
+        transaction, and the ``409`` it produces tells the household to retry
+        something that will fail again identically.
+
+        The lot's own merge-key columns are read in the same statement, from a
+        second alias, rather than carried in from Python -- one round trip, and
+        no window in which the caller's copy of ``best_before`` is stale.
+        """
+        source = aliased(InventoryLot)
+        found = await self._session.scalar(
+            select(InventoryLot.id)
+            .where(
+                source.id == item_id,
+                source.household_id == household_id,
+                InventoryLot.household_id == household_id,
+                InventoryLot.id != item_id,
+                InventoryLot.depleted_at.is_(None),
+                InventoryLot.storage_location_id == location_id,
+                InventoryLot.product_id == source.product_id,
+                # ``NULLS NOT DISTINCT`` on the index, so two dateless lots do
+                # collide; ``IS NOT DISTINCT FROM`` is the predicate that agrees
+                # with it, and a plain ``=`` would miss exactly that case.
+                InventoryLot.best_before.is_not_distinct_from(source.best_before),
+                InventoryLot.quantity_dimension == source.quantity_dimension,
+            )
+            .limit(1)
+        )
+        return found is not None
+
     async def find_mergeable(self, household_id: uuid.UUID, draft: LotDraft) -> LotState | None:
         """The active lot this draft would collide with on ``uq_inventory_lot_merge_key``.
 
@@ -235,6 +347,8 @@ class SqlInventoryRepository:
             "best_before",
             "date_kind",
             "opened_at",
+            "frozen_at",
+            "thawed_at",
         ):
             value = getattr(update, field)
             if value is not UNSET:

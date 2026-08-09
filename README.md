@@ -20,20 +20,25 @@ Self-hostable food stock management with AI recipe suggestions — running on
 ---
 
 > [!WARNING]
-> **Authentication has landed. Four things about it are still worth knowing
+> **Authentication has landed. Three things about it are still worth knowing
 > before you put this on a public address.**
 >
-> - **There is no password reset**, because there is no SMTP anywhere in this
->   project. A forgotten password is a forgotten account — an owner re-inviting
->   the person is the only recovery path. That is a deliberate trade: an
->   unverified recovery flow is an account takeover with a friendly name.
-> - **Registration is an enumeration oracle.** An address already in use gets a
->   `409`, so anyone can learn whether you have an account here. Closing it means
->   answering by email, which see above.
-> - **The rate limiters are per process.** They are dictionaries on `app.state`,
->   so running with `--workers 2` gives whoever is guessing a password two
->   budgets instead of one. Run a single worker until that state moves to
->   PostgreSQL.
+> (A fourth used to be here — the rate limiters were per-process dictionaries, so
+> `--workers 2` handed a password guesser two budgets. They are shared token
+> buckets in PostgreSQL now, committed outside the request transaction so a
+> failed request still counts, and this deployment no longer needs to run a
+> single worker for them to mean what they say.)
+>
+> - **Password reset needs SMTP, and SMTP is optional.** Set
+>   `CHAUDRON_SMTP_HOST` and the recovery path exists; leave it empty and it does
+>   not — in which case a forgotten password is still a forgotten account, and
+>   the sign-in screen says so instead of offering a link that cannot work. What
+>   the application will not do is accept a reset request and quietly drop it.
+> - **Registration no longer confirms whether an address has an account.** It
+>   answers `202` either way and, with SMTP configured, sends one of two messages
+>   to the address itself. It therefore no longer signs you in: a session could
+>   only be issued on one of the two branches, which is the oracle restated as a
+>   status code. Create the account, then sign in.
 > - **Row-level security only enforces if the API connects as the application
 >   role.** The table owner bypasses its own policies and nothing warns you:
 >   provisioning is an installation step, not an option. An instance that skips
@@ -62,6 +67,7 @@ application never pays for anyone's inference and never sees anyone's data.
 |---|---|---|
 | 🔐 **Accounts and sessions** | ✅ built | Argon2id passwords (RFC 9106 profile), sessions held server-side so signing out means something, `__Host-` cookie, CSRF token on every unsafe method. The household header is now a *selector* checked against membership, never a proof. |
 | 📦 **Stock tracking** | ✅ built | What you own, where it's stored, and when it expires — per household, not per person. Use-by and best-before are distinct: conflating them means either anxious alerts on dry pasta or silence on minced beef. Items can be corrected and removed after the fact. |
+| ❄️ **Freezing at home** | ✅ built | “J'ai acheté du blanc de poulet mais je le congèle” — the lot moves to the freezer, its use-by stops being Thursday and becomes the family's freezer time, and the recipe engine is told it needs thawing before it can be cooked. Three things are refused rather than recorded: freezing food that is *already* past its date (freezing halts spoilage, it does not reverse it), freezing something that has been thawed (ANSES — and once thawed it keeps three days, refrigerated), and freezing the same lot twice, which would buy it another three months for a duplicate tap. Where the keeping table has no honest figure — most vegetables, whose answer depends on blanching — no date is proposed, and “no date” is never “keeps indefinitely”. |
 | 📷 **Barcode scanning** | ✅ built | Decoded **in the browser** — the server only ever sees thirteen characters, never a video stream. Products resolve through [Open Food Facts](https://world.openfoodfacts.org/). |
 | 🍳 **Recipe suggestions** | ✅ built | Generated from the stock actually on hand. Whether an ingredient is in stock is **recomputed against your inventory**, never taken from the model's word for it. |
 | 🥗 **Dietary constraints** | ✅ built | Allergens, diets and infant food rules are applied as a **filter on the inventory before the model is asked**, and every ingredient it writes back is re-resolved against what was allowed. A suggestion that cannot be resolved is discarded, not shown. The one constraint a filter cannot express — an infant's required texture — is sent to the model, under consent; see *What the model is not told*. |
@@ -76,8 +82,8 @@ application never pays for anyone's inference and never sees anyone's data.
 | 💶 **Budget** | ✅ built | Spending per calendar week or month, against an optional target, computed from **receipt totals** — which now exist. The arithmetic, its coverage warnings, and the path from a confirmed receipt to the figure on this screen are all tested. |
 | 🧾 **Receipt import** | ✅ built | A drive order recap or a photographed till receipt becomes a **proposal you review line by line**; nothing reaches your stock until you confirm it, because a model that reads `PDT NOUV 1KG` is right about half the time and a silently wrong stock is worse than an empty one. The PDF path needs no model at all — the text is read straight out of the document, in a **separate process under memory and CPU limits**, so a decompression bomb costs one worker rather than the instance. A photo does need a vision model, and there is **no OCR engine here**: without one configured, the app says so instead of guessing. The image itself is never kept — only a hash, to catch the double upload. |
 | 🏡 **Home Assistant** | ✅ built | A HACS custom integration in [`homeassistant/`](homeassistant/): what is expiring, what is expired, stock and shopping-list counts, food spend — and the shopping list as a **native `todo` entity**, so it appears in the dashboard's to-do card and in Assist. Authenticates with a scoped machine token, never a session. |
-| 🔁 **Password reset** | ❌ not started | Needs outbound email. There is none, on purpose. |
-| 📧 **Forwarded order emails** | ❌ not started | Configuration keys exist; the webhook does not. |
+| 🔁 **Password reset** | ✅ built | **Only if you configure SMTP** — it is optional, and an instance without it says so rather than offering a link that leads to an apology. The link is single-use, lives an hour, is stored as a digest, and dies when the password changes. Completing a reset **ends every session on every device**, because a reset that leaves an intruder signed in has done nothing. Registration also stopped answering `409` for an address that already exists: it answers the same `202` either way and the difference is sent to the mailbox, which is the only party entitled to it. |
+| 📧 **Forwarded order emails** | ❌ not started | *Inbound*, and unrelated to the outbound mail above. Configuration keys exist; the webhook does not. |
 
 ## Bring your own model
 
@@ -297,6 +303,31 @@ figure computed on partial data has to say the data is partial, or it is a
 number that invites a conclusion it cannot support. The screen is also opt-in:
 nothing is computed until you ask.
 
+| Freezing a fresh lot | Who may sign in | Setting up a model |
+|---|---|---|
+| <img src="docs/screenshots/freezing.webp" alt="Chicken fillets, now filed under the freezer, badged as frozen, good until November, with the printed August use-by kept underneath as a footnote" width="240"> | <img src="docs/screenshots/household-access.webp" alt="The accounts that can open this household, with roles, distinguished from the people who eat here" width="240"> | <img src="docs/screenshots/provider-setup.webp" alt="The provider screen on a fresh instance, explaining that nothing leaves until a provider is registered" width="240"> |
+
+**Left — the whole freezing feature in one frame.** Those chicken fillets were
+bought with a use-by of **10 August**. They have been frozen, so they have moved
+into the freezer, they read *good until 6 November*, and the printed date is
+still on the row underneath. Nothing was overwritten: the application does not
+erase what somebody read off the packaging, it says what it now believes and
+shows its working. Take them out and the date drops to three days — refrigerated,
+and never refrozen. Those are ANSES's rules, not ours.
+
+**Middle — accounts, not eaters, and the screen says so in as many words.** The
+people higher up that tab are who you cook *for*: an infant, someone who will
+never have a login, each with their own allergens. These are the keys. Conflating
+the two is the mistake the panel opens by warning about. Above it sits *close
+every session*, which is honest about its own limits — it does not touch machine
+tokens, because a lost laptop should not unplug the household's integrations.
+
+**Right — what a fresh instance actually shows.** Until this release that screen
+was forty-seven lines of prose telling you to edit the server's environment.
+It now leads with the sentence that matters: **everything except recipe
+suggestions and photographed receipts works with no model at all, and until you
+register one, nothing from this household leaves the instance.**
+
 <div align="center">
 <img src="docs/screenshots/degraded-banner.webp" alt="Banner explaining what the configured model cannot do" width="320">
 </div>
@@ -423,9 +454,15 @@ and, the one that blocked everything else, **the absence of authentication**.
 `X-Household-Id` used to be shipped inside the JavaScript bundle and accepted as
 authorisation; it is now a selector checked against the session's memberships.
 
-Still open, and named rather than buried: no password reset, an enumeration
-oracle on registration, per-process rate limiters, and no retention policy for
-the inventory snapshots kept alongside each suggestion.
+Two more are closed since: **password reset** (O-10f's prerequisite) and **the
+enumeration oracle on registration**, which went together — the reset flow is
+what made it possible for sign-up to stop distinguishing an address that has an
+account from one that does not, by moving the answer to the mailbox.
+
+Still open, and named rather than buried: no address *verification* (an account
+can be created with somebody else's address, and the message it receives is the
+only signal), and no retention policy for the inventory snapshots kept alongside
+each suggestion.
 
 Images are signed with cosign on publication, and the update path verifies the
 signature against the workflow identity **before** applying it — there is no

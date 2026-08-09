@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Final
 
-from sqlalchemy import ColumnElement, Date, Select, func
+from sqlalchemy import ColumnElement, Date, Select, case, func, literal, type_coerce
 
 from chaudron.domain.models import (
     ExpiryDateKind,
@@ -70,6 +70,25 @@ class ShelfLifeSpec:
     date_kind: ExpiryDateKind
     source_url: str
     note: str | None = None
+    #: Days from the moment *this household* put the lot in its own freezer.
+    #:
+    #: Not the same thing as :attr:`FoodFamily.FROZEN`, and the difference is the
+    #: whole reason this column exists. That family means "sold frozen" -- a bag
+    #: of peas, a tub of ice cream -- and such a pack carries a printed date that
+    #: applies normally. This is a *state a lot enters*, like being opened, and it
+    #: applies to a product of any family: chicken breast bought fresh and frozen
+    #: the same evening is still `fresh_meat`, and reclassifying it would hand it
+    #: the printed date of an industrial frozen product it is not.
+    #:
+    #: ``None`` means **this application proposes no date for a frozen lot of this
+    #: family**, and it is the honest answer in two different situations that the
+    #: note must tell apart: freezing is inadvisable (eggs in shell burst, a tin
+    #: bursts), or the quality outcome depends on preparation this table cannot
+    #: know (most vegetables want blanching first). Neither is "keeps forever".
+    home_frozen_days: int | None = None
+    #: Why the figure above is what it is, or why there is none. Shown next to a
+    #: proposed date, in the same register as :attr:`note`.
+    freezing_note: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -216,6 +235,16 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "Durée après ouverture : repère ANSES de 3 jours pour un aliment "
             "sensible entamé. La date imprimée sur l'emballage prime toujours."
         ),
+        # No figure, and the family is why. FoodKeeper gives milk 3 months, but
+        # this family also holds yogurt, cream and fromage blanc, which separate
+        # on thawing. One number would be right for the first and misleading for
+        # the rest, and the failure is quality rather than safety -- so the note
+        # carries what is known and the application proposes nothing.
+        freezing_note=(
+            "Le lait se congèle (environ 3 mois, USDA FoodKeeper) ; les yaourts, "
+            "crèmes et fromages blancs tranchent à la décongélation. Aucune date "
+            "n'est proposée : la famille est trop hétérogène pour un seul chiffre."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.CHEESE,
@@ -233,6 +262,12 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "du règlement (UE) 1169/2011 art. 24, faute de source française "
             "classant explicitement les pâtes pressées."
         ),
+        home_frozen_days=180,
+        freezing_note=(
+            "6 mois (USDA FoodKeeper). La sécurité n'est pas en cause, la "
+            "texture si : une pâte pressée congelée s'émiette à la découpe. "
+            "Convient au fromage destiné à être cuisiné, moins à un plateau."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.FRESH_MEAT,
@@ -247,6 +282,17 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "Borne basse de la fourchette USDA FoodKeeper (viande hachée et "
             "volaille). La DLC imprimée prime ; l'ouverture l'annule (ANSES)."
         ),
+        # FoodKeeper's freezer times split by cut -- minced 3-4 months, poultry
+        # pieces 9, whole cuts up to 12 -- and this table cannot tell them apart.
+        # The short end again, for the same reason it was taken above: minced
+        # meat is the case a long figure would fail, and it is also the most
+        # commonly frozen.
+        home_frozen_days=90,
+        freezing_note=(
+            "Environ 3 mois : borne basse USDA FoodKeeper, celle de la viande "
+            "hachée. Congeler avant la DLC, jamais après. Après décongélation, "
+            "3 jours au réfrigérateur et on ne recongèle pas (ANSES)."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.FRESH_FISH,
@@ -256,6 +302,15 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
         date_kind=ExpiryDateKind.USE_BY,
         source_url=_FOODKEEPER,
         note="Ordres de grandeur USDA FoodKeeper. La DLC imprimée prime.",
+        # Fatty fish goes rancid in the freezer long before lean fish does:
+        # FoodKeeper gives 2-3 months for salmon or mackerel against 6-8 for cod.
+        # The short end covers the family.
+        home_frozen_days=60,
+        freezing_note=(
+            "Environ 2 mois : borne basse USDA FoodKeeper, celle des poissons "
+            "gras, qui rancissent bien avant les poissons maigres. Après "
+            "décongélation, 3 jours et pas de recongélation (ANSES)."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.EGGS,
@@ -273,6 +328,14 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "21 jours à partir de l'achat est une estimation prudente ; la date "
             "de l'emballage prime."
         ),
+        # Not "no figure available" but "do not do this": a shell egg cracks as
+        # its contents expand. Beaten out of the shell they freeze for months,
+        # which is a different product than the one this lot holds.
+        freezing_note=(
+            "Ne congelez pas des œufs en coquille : elle éclate en gelant. "
+            "Battus et sortis de leur coquille, ils se congèlent plusieurs mois "
+            "— mais c'est un autre produit que ce lot."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.PRODUCE,
@@ -284,6 +347,14 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
         note=(
             "Les fruits et légumes non transformés sont dispensés de date "
             "(règlement (UE) 1169/2011, annexe X). L'estimation est indicative."
+        ),
+        # Blanching is the whole question and this table cannot know whether it
+        # happened. Blanched vegetables keep 8-12 months; unblanched ones lose
+        # colour, texture and vitamins within weeks. Fruit freezes without it.
+        freezing_note=(
+            "Les légumes se congèlent bien après blanchiment (8 à 12 mois) et "
+            "mal sans (quelques semaines). Les fruits n'en ont pas besoin. "
+            "Aucune date proposée : elle dépend d'une préparation inconnue ici."
         ),
     ),
     ShelfLifeSpec(
@@ -299,6 +370,14 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "porte sur la qualité. Après décongélation, 3 jours (ANSES), et ne "
             "jamais recongeler."
         ),
+        # Already frozen when bought, so there is nothing to freeze: the printed
+        # date applies as it stands. What matters for this family is the other
+        # direction -- once thawed it must not go back.
+        freezing_note=(
+            "Déjà surgelé : la date imprimée s'applique telle quelle. Une fois "
+            "décongelé, 3 jours au réfrigérateur et jamais de recongélation "
+            "(ANSES)."
+        ),
     ),
     ShelfLifeSpec(
         family=FoodFamily.DRY_GOODS,
@@ -310,6 +389,11 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
         note=(
             "ANSES : le sel, le sucre, les pâtes, le riz et la farine ne "
             "présentent pas de risque après la DDM. Ordres de grandeur USDA."
+        ),
+        freezing_note=(
+            "Congeler l'épicerie sèche n'apporte rien à sa conservation, qui se "
+            "compte déjà en mois. La farine y passe parfois quelques jours pour "
+            "tuer d'éventuels charançons ; ce n'est pas une durée de garde."
         ),
     ),
     ShelfLifeSpec(
@@ -323,6 +407,12 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
             "Une fois ouverte, une conserve se transvase dans un contenant "
             "fermé et se consomme sous 3 jours."
         ),
+        # A sealed tin in a freezer bursts: water expands, the seam gives, and
+        # the failure is a botulism risk rather than a mess.
+        freezing_note=(
+            "Ne congelez pas une conserve dans sa boîte : le contenu gonfle et "
+            "la sertissure cède. Transvasez d'abord dans un contenant adapté."
+        ),
     ),
 )
 
@@ -335,12 +425,35 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
 #
 #     min(best_before, opened_at + shelf_life_guideline.opened_days)
 #
-# Two properties decide the implementation, and both are safety properties.
+# **Freezing is the one thing that does not fit that shape, and it is why there
+# is now a ``CASE`` here.** Everything else about a lot can only bring the date
+# forward, so a ``LEAST`` was both the rule and its own guarantee. Putting a lot
+# in a freezer does the opposite: it stops the clock and starts a different one.
+# A formula built on ``LEAST`` cannot express that, and forcing it to would have
+# meant either keeping a printed date that no longer applies or inventing a
+# minimum that is not one.
 #
-# *The clamp only ever shortens.* ANSES is explicit that opening voids the
-# printed date; a formula able to push a date outwards would be a food-safety
-# bug rather than a rounding difference. ``LEAST`` cannot extend anything, which
-# is why it is used instead of a hand-written ``CASE``.
+# So the three states are written out, and their *order* is the safety property
+# the ``LEAST`` used to provide for free:
+#
+#     thawed   -> thawed_at + 3 days       (ANSES; the printed date stays void)
+#     frozen   -> frozen_at + home_frozen_days
+#     neither  -> min(best_before, opened_at + opened_days)
+#
+# Thawed is tested first on purpose. A lot that was frozen and then thawed
+# carries *both* timestamps, and reading the frozen branch first would answer
+# "three months" about meat that came out of the freezer on Tuesday. That single
+# ordering is the difference between a correct answer and a dangerous one, which
+# is why it is the first thing this comment says and the first thing the tests
+# check.
+#
+# Two properties decide the rest of the implementation, and both are safety
+# properties.
+#
+# *Outside the freezer, the clamp only ever shortens.* ANSES is explicit that
+# opening voids the printed date; a formula able to push a date outwards would be
+# a food-safety bug rather than a rounding difference. ``LEAST`` cannot extend
+# anything, which is why the third branch keeps it.
 #
 # *A missing input removes the clamp; it never invents one.* No ``opened_at``,
 # no ``product.food_family``, no guideline row, or a family whose ``opened_days``
@@ -365,17 +478,47 @@ SHELF_LIFE_GUIDELINES: Final[Sequence[ShelfLifeSpec]] = (
 # it is a decision rather than an accident.
 
 
+#: What ANSES allows a thawed food, in days, refrigerated. The same figure as
+#: :data:`_ANSES_OPENED_DAYS` and deliberately a separate name: they are two
+#: different rules that happen to agree, and collapsing them would mean a future
+#: revision to one silently moved the other.
+_ANSES_THAWED_DAYS: Final = 3
+
+
 def effective_expiry(
     best_before: date | None,
     opened_at: date | None,
     opened_days: int | None,
+    *,
+    frozen_at: date | None = None,
+    thawed_at: date | None = None,
+    home_frozen_days: int | None = None,
 ) -> date | None:
     """When this lot becomes unfit, or ``None`` when nothing says.
 
     The Python twin of :func:`effective_expiry_sql`, for callers that already
-    hold the three values. ``None`` means the application knows of no date at
-    all -- not "it keeps forever", and not a date to invent.
+    hold the values. ``None`` means the application knows of no date at all --
+    not "it keeps forever", and not a date to invent.
+
+    The freezing arguments are keyword-only and default to "never frozen", so
+    every existing caller keeps the rule it was written against.
     """
+    if thawed_at is not None:
+        # First, and the ordering is the safety property: a lot that was frozen
+        # and thawed carries both dates, and answering from the frozen branch
+        # would give it months instead of days.
+        return thawed_at + timedelta(days=_ANSES_THAWED_DAYS)
+
+    if frozen_at is not None:
+        # The printed date is void -- freezing stopped that clock. No figure for
+        # the family means no date at all, which is the honest answer and not
+        # the same as "indefinitely": `home_frozen_days` is NULL for the families
+        # this table will not put a number on, including the ones that should not
+        # be frozen at all.
+        if home_frozen_days is None:
+            return None
+        return frozen_at + timedelta(days=home_frozen_days)
+
     after_opening = (
         None
         if opened_at is None or opened_days is None
@@ -390,11 +533,35 @@ def effective_expiry_sql() -> ColumnElement[date]:
 
     Requires ``inventory_lot`` and ``shelf_life_guideline`` in the statement's
     ``FROM``; :func:`join_shelf_life_guideline` is how the second one gets there.
+
+    The branches are ordered exactly as in :func:`effective_expiry`, and
+    ``tests/domain/test_effective_expiry.py`` drives the same table through both
+    rather than trusting that two hand-written copies of one rule agree.
+
+    The frozen branch needs no ``COALESCE``: ``frozen_at + NULL`` is NULL in
+    PostgreSQL, so a family with no figure yields no date on its own -- the same
+    reliance on NULL arithmetic that lets ``LEAST`` express the third branch.
     """
-    return func.least(
-        InventoryLot.best_before,
-        InventoryLot.opened_at + ShelfLifeGuideline.opened_days,
-        type_=Date(),
+    # `type_coerce` rather than `cast`: every branch already yields a date, so
+    # there is nothing for the database to convert. What is missing is only the
+    # type SQLAlchemy reports to the rest of the query -- which the ordering and
+    # the `expiring_within_days` comparison need.
+    return type_coerce(
+        case(
+            (
+                InventoryLot.thawed_at.is_not(None),
+                InventoryLot.thawed_at + literal(_ANSES_THAWED_DAYS),
+            ),
+            (
+                InventoryLot.frozen_at.is_not(None),
+                InventoryLot.frozen_at + ShelfLifeGuideline.home_frozen_days,
+            ),
+            else_=func.least(
+                InventoryLot.best_before,
+                InventoryLot.opened_at + ShelfLifeGuideline.opened_days,
+            ),
+        ),
+        Date(),
     )
 
 

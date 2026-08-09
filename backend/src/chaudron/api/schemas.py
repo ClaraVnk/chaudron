@@ -179,6 +179,21 @@ class InventoryItemOut(BaseModel):
     effective_expires_on: date | None
     source: StockEntrySource
     created_at: datetime
+    #: When the household froze this lot itself, and when it took it out again.
+    #:
+    #: Distinct from a product *sold* frozen, which is a property of the product
+    #: and not of the lot. Both are needed to read ``effective_expires_on``: on a
+    #: frozen lot it counts from ``frozen_at``, on a thawed one it is three days
+    #: from ``thawed_at``, and a client shown only the result has no way to say
+    #: why the chicken it bought on Tuesday is now good until November.
+    frozen_at: date | None = None
+    thawed_at: date | None = None
+    #: What the keeping table says about freezing this family, verbatim and in
+    #: French. Present on every item rather than only in the answer to a freeze,
+    #: because the two sentences worth the most -- a shell egg bursts, a sealed
+    #: tin bursts -- have to arrive *before* the door closes. ``None`` when the
+    #: product resolved to no family.
+    freezing_note: str | None = None
 
     @field_serializer("created_at")
     def _as_zulu(self, value: datetime) -> str:
@@ -263,6 +278,35 @@ class InventoryItemMutatedOut(InventoryItemOut):
     """
 
     depleted: DepletedOut | None = None
+
+
+class FrozenInventoryItemOut(InventoryItemOut):
+    """The answer to a freeze or a thaw: the item, and what else the user must know.
+
+    A subclass for the reason :class:`InventoryItemMutatedOut` is one: these three
+    fields answer a question only somebody who just pressed the button is asking,
+    and hanging them off every row of a 200-item listing would cost that on every
+    refresh, forever. ``freezing_note`` is the exception and lives on the parent --
+    it is advice to read *before* acting.
+
+    ``location_change`` is a code, not a sentence. Three of its four values are
+    things the interface explains in French, and the server has no business
+    choosing that wording; ``moved_to`` is filled only for ``moved``.
+    """
+
+    location_change: Literal["moved", "already_there", "unresolved", "occupied"]
+    moved_to: LocationRefOut | None
+    #: Whether an expiry date is now proposed for this lot. ``false`` means the
+    #: keeping table has no honest figure for this family frozen -- which is not
+    #: "it keeps indefinitely", and is why ``freezing_note`` is beside it.
+    proposes_expiry_date: bool
+    #: Set on a thaw when the lot had already run past its frozen duration, and
+    #: ``null`` otherwise. Without it the screen goes from "expired" to "three
+    #: days left" and reads as though thawing had rescued the food. It did not:
+    #: the freezer figure is about quality and the three-day one is about safety,
+    #: so both numbers are right and only their juxtaposition misleads. This is
+    #: the sentence that reconciles them.
+    quality_warning: str | None = None
 
 
 class InventoryRemovalOut(BaseModel):

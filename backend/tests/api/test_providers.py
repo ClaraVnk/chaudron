@@ -17,6 +17,7 @@ import uuid
 
 import httpx
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,8 +26,6 @@ from chaudron.domain.models import (
     LlmConfigStatus,
     LlmProviderConfig,
     LlmProviderMode,
-    LlmPurpose,
-    LlmPurposeBinding,
 )
 from chaudron.infra.crypto import CredentialCipher
 from tests.conftest import MakeHousehold, build_test_cipher, household_headers
@@ -278,36 +277,45 @@ async def test_a_key_the_instance_can_no_longer_decrypt_says_so_instead_of_promi
     assert STORED_KEY not in response.text
 
 
-async def test_the_purpose_binding_decides_between_two_configurations(
-    api_client: httpx.AsyncClient, db_session: AsyncSession, make_household: MakeHousehold
+async def test_a_second_live_configuration_is_refused_by_the_database(
+    db_session: AsyncSession, make_household: MakeHousehold
 ) -> None:
-    """Without a binding, two candidates is a question, not a licence to pick one.
+    """``uq_llm_provider_config_household_active``, asserted where it lives.
 
-    Choosing arbitrarily would spend money on a provider the household did not
-    select for this feature.
+    Revision ``0025`` made "one household, one configuration" a schema rule rather
+    than something the service tries to remember, and this is the assertion that says
+    so: the second insert is refused with no application code involved at all. It is
+    what lets ``ProviderService._load`` read one row instead of arbitrating a list,
+    and what makes two owners pressing "create" at the same instant produce one
+    configuration rather than two.
     """
     household = await make_household()
-    await add_config(db_session, household, label="cheap", model="gpt-4o-mini")
-    chosen = await add_config(db_session, household, label="good", model="gpt-4o")
+    await add_config(db_session, household, label="the one")
 
-    ambiguous = (
-        await api_client.get(CAPABILITIES_URL, headers=household_headers(household))
-    ).json()
-    assert ambiguous["configured"] is False
-    assert "Plusieurs configurations" in ambiguous["degraded_reasons"][0]
+    with pytest.raises(IntegrityError, match="uq_llm_provider_config_household_active"):
+        await add_config(db_session, household, label="a second one")
 
-    db_session.add(
-        LlmPurposeBinding(
-            household_id=household.id,
-            purpose=LlmPurpose.RECIPE_GENERATION,
-            llm_provider_config_id=chosen.id,
-        )
-    )
+
+async def test_archiving_frees_the_slot_for_a_replacement(
+    api_client: httpx.AsyncClient, db_session: AsyncSession, make_household: MakeHousehold
+) -> None:
+    """The rule is one *live* configuration, not one ever -- so switching provider works.
+
+    The index is partial on ``archived_at IS NULL``. Without that, a household that
+    changed provider once could never change again, and the record of what it had
+    authorised would have to be deleted to let it.
+    """
+    household = await make_household()
+    first = await add_config(db_session, household, label="the old one", model="gpt-4o-mini")
+    first.archived_at = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    first.status = LlmConfigStatus.DISABLED
     await db_session.flush()
 
-    bound = (await api_client.get(CAPABILITIES_URL, headers=household_headers(household))).json()
-    assert bound["configured"] is True
-    assert bound["model"] == "gpt-4o"
+    await add_config(db_session, household, label="the new one", model="gpt-4o")
+
+    banner = (await api_client.get(CAPABILITIES_URL, headers=household_headers(household))).json()
+    assert banner["configured"] is True
+    assert banner["model"] == "gpt-4o"
 
 
 async def test_the_endpoint_needs_a_session(anonymous_client: httpx.AsyncClient) -> None:
@@ -315,8 +323,30 @@ async def test_the_endpoint_needs_a_session(anonymous_client: httpx.AsyncClient)
 
 
 # --------------------------------------------------------------------------- #
-# Consent (revision 0016)
+# Consent (revision 0016, and the CHECK revision 0021 finally added)
 # --------------------------------------------------------------------------- #
+
+
+async def legacy_unconsented_rows_are_possible(session: AsyncSession) -> None:
+    """Reproduce the pre-``0016`` row that revision ``0021`` deliberately tolerates.
+
+    ``ck_llm_provider_config_consent_required_by_mode`` makes "a ``byok`` or
+    ``instance_owner`` row with no agreement" unrepresentable **from now on**, and it
+    was deployed ``NOT VALID`` precisely because such rows may already exist: 0016
+    refused to backfill a consent, on the grounds that an invented date would
+    manufacture the legal basis for a transfer nobody agreed to.
+
+    So the state below is not hypothetical, and the gate is what stands between it
+    and an outbound request. Dropping the constraint inside the test's own
+    transaction is how it is reached now that the constraint exists; PostgreSQL rolls
+    the DDL back with everything else, so nothing survives the test.
+    """
+    await session.execute(
+        text(
+            "ALTER TABLE llm_provider_config"
+            " DROP CONSTRAINT ck_llm_provider_config_consent_required_by_mode"
+        )
+    )
 
 
 async def test_a_provider_without_a_recorded_consent_is_refused(
@@ -324,12 +354,16 @@ async def test_a_provider_without_a_recorded_consent_is_refused(
 ) -> None:
     """No agreement on record means the provider is unusable, not merely flagged.
 
-    ``docs/security-model.md`` section 12 makes consent the legal basis for sending
+    ``docs/security-model.md`` §8.3 makes consent the legal basis for sending
     anything to a model provider, and requires it to be opt-in. A configuration whose
-    ``consented_at`` is ``NULL`` predates revision 0016 or was written straight to the
-    database; either way nobody agreed, and the row fails closed.
+    ``consented_at`` is ``NULL`` predates revision 0016; either way nobody agreed, and
+    the row fails closed. Since revision ``0021`` no route and no ``INSERT`` can
+    produce a new one -- which is what
+    :func:`legacy_unconsented_rows_are_possible` has to work around to keep testing
+    the gate that still guards the old ones.
     """
     household = await make_household()
+    await legacy_unconsented_rows_are_possible(db_session)
     await add_config(db_session, household, consented=False)
 
     body = (await api_client.get(CAPABILITIES_URL, headers=household_headers(household))).json()
@@ -399,8 +433,13 @@ async def test_consent_cannot_be_withdrawn_before_it_was_given(
     column that comparison yields NULL, which a CHECK accepts. Written as a test
     because the first version of this constraint was the verbatim copy, and it
     admitted the row.
+
+    The consent-by-mode CHECK of revision ``0021`` is stood down for the length of
+    this test, because it would refuse the same row first and for a different
+    reason -- leaving the ordering constraint asserted by nothing at all.
     """
     household = await make_household()
+    await legacy_unconsented_rows_are_possible(db_session)
 
     with pytest.raises(IntegrityError) as raised:
         await add_config(

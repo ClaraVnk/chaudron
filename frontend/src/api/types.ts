@@ -60,8 +60,55 @@ export interface InventoryItem {
   expires_on: string | null;
   expiry_kind: ExpiryKind | null;
   opened_at: string | null;
+  /**
+   * When the lot actually becomes unfit, which is **not** `expires_on`.
+   *
+   * `expires_on` is what somebody read off the packaging and what a PATCH round
+   * trips. This is what the server sorts, filters and alerts on: the printed date
+   * shortened by the after-opening rule, or *replaced* by the freezer — a lot
+   * frozen the day before its use-by is good for months, and one thawed this
+   * morning has three days whatever the pack says. Every urgency the interface
+   * shows has to be computed from this one, or it contradicts the list order it
+   * was rendered in.
+   *
+   * Can be non-null while `expires_on` is null, and vice versa.
+   */
+  effective_expires_on: string | null;
+  /** When this household froze the lot itself, and when it took it out again. */
+  frozen_at: string | null;
+  thawed_at: string | null;
+  /**
+   * What the keeping table says about freezing this family, in French, ready to
+   * show. Present on every item rather than only after a freeze, because its two
+   * most useful sentences — a shell egg bursts, a sealed tin bursts — are worth
+   * reading *before* the freezer door closes. `null` for a product whose family
+   * the catalogue never resolved.
+   */
+  freezing_note: string | null;
   source: ItemSource;
   created_at: string;
+}
+
+/** Where a freeze or a thaw filed the lot, or why it filed it nowhere. */
+export type LocationChange = 'moved' | 'already_there' | 'unresolved' | 'occupied';
+
+/**
+ * `POST /v1/inventory/{id}/freeze` and `/thaw` — the item, plus what else the
+ * user has to be told.
+ *
+ * A separate type for the reason `UpdatedInventoryItem` is one: these three
+ * fields answer a question only somebody who just pressed the button is asking,
+ * and a page of 200 rows has no business carrying 200 nulls of them.
+ */
+export interface FrozenInventoryItem extends InventoryItem {
+  location_change: LocationChange;
+  moved_to: EmbeddedLocation | null;
+  /**
+   * Whether an expiry date is now proposed at all. `false` means the keeping
+   * table has no honest figure for this family frozen — which is **not** "it
+   * keeps indefinitely", and is why `freezing_note` is worth showing beside it.
+   */
+  proposes_expiry_date: boolean;
 }
 
 export interface InventoryPage {
@@ -819,4 +866,67 @@ export interface ReceiptConfirmResult {
   created_lot_count: number;
   ignored_line_count: number;
   created_product_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Household access: who may sign in, and the invitations that let them
+// ---------------------------------------------------------------------------
+//
+// Not to be confused with `HouseholdMember` above, which is an **eater** —
+// somebody with allergens and a diet who may well have no account at all. These
+// are `household_member` rows on the server: an account with a role.
+
+/** What a membership authorises. `viewer` reads and writes nothing. */
+export type MembershipRole = 'owner' | 'member' | 'viewer';
+
+/** One account that may open this household. */
+export interface HouseholdAccess {
+  user_id: string;
+  display_name: string;
+  email: string;
+  role: MembershipRole;
+  joined_at: string;
+  /** Whether this row is the signed-in account, decided server-side. */
+  is_self: boolean;
+}
+
+/**
+ * A pending invitation, as the household reads it back. Carries no secret.
+ *
+ * `prefix` and `last4` are all that survives the creation response, exactly as
+ * for a machine token: an invitation that could be read back in full would be an
+ * invitation a screenshot is enough to steal.
+ */
+export interface HouseholdInvitation {
+  id: string;
+  /** Never `owner`: the server refuses it, and so does a check constraint. */
+  role: Exclude<MembershipRole, 'owner'>;
+  prefix: string;
+  last4: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** The creation response, and the **only** one that ever carries `token`. */
+export interface HouseholdInvitationCreated extends HouseholdInvitation {
+  token: string;
+}
+
+/**
+ * What creating an invitation sends.
+ *
+ * `expires_in_days` may be `null`, which means the server's default of a week —
+ * and unlike a machine token there is no "never": an invitation that does not
+ * expire is a permanent way into the household, sitting in a chat log.
+ */
+export interface HouseholdInvitationDraft {
+  role: Exclude<MembershipRole, 'owner'>;
+  expires_in_days: number | null;
+}
+
+/** What redeeming an invitation produced. */
+export interface RedeemedInvitation {
+  household_id: string;
+  household_name: string;
+  role: MembershipRole;
 }

@@ -91,6 +91,13 @@ TOKEN_REACHABLE: Final[dict[str, frozenset[str]]] = {
     "POST /v1/inventory": frozenset({"inventory:write"}),
     "PATCH /v1/inventory/{item_id}": frozenset({"inventory:write"}),
     "DELETE /v1/inventory/{item_id}": frozenset({"inventory:write"}),
+    # Freezing is an inventory write like any other, and reachable by a token for
+    # the same reason the other three are: a household-automation appliance that
+    # may add and remove stock has no business being unable to say that the stock
+    # went into the freezer -- the alternative is a lot whose date the application
+    # keeps counting down while the food sits at -18 °C.
+    "POST /v1/inventory/{item_id}/freeze": frozenset({"inventory:write"}),
+    "POST /v1/inventory/{item_id}/thaw": frozenset({"inventory:write"}),
     "GET /v1/shopping-lists/current": frozenset({"shopping:read"}),
     "POST /v1/shopping-lists/current/items": frozenset({"shopping:write"}),
     "PATCH /v1/shopping-lists/current/items/{item_id}": frozenset({"shopping:write"}),
@@ -133,6 +140,22 @@ PUBLIC_PATHS: Final[dict[str, str]] = {
     "/readyz": "readiness probe: reports the database, never a household's data",
     "/v1/auth/register": "creates the account; there is by definition no session yet",
     "/v1/auth/login": "exchanges a password for a session; the whole point is to have none",
+    # The recovery path, which exists precisely for somebody who cannot sign in.
+    # All three are argued at length in `api/routers/auth.py`; the short form is
+    # that each answers identically for every address, so being public discloses
+    # nothing. `/capabilities` reports whether this instance has a mail relay --
+    # a property of the deployment, not of any account; `reset-request` answers
+    # one constant `202`; `reset` consumes a single-use token that *is* the
+    # credential, and requiring a session to use one would defeat its only purpose.
+    "/v1/auth/capabilities": "says whether this instance can send mail at all; names no account",
+    "/v1/auth/password/reset-request": (
+        "asks for a reset link; the caller cannot sign in, and the answer is the "
+        "same constant 202 whether or not the address has an account"
+    ),
+    "/v1/auth/password/reset": (
+        "the single-use token from the message is the credential; a session cannot "
+        "be required from somebody who is locked out"
+    ),
     # The two CalDAV discovery endpoints a client hits *before* it has been given
     # credentials. Both are answered by handlers that take no household and touch
     # no tenant table: one is a 301 to the context path (RFC 6764 6), the other
@@ -530,9 +553,27 @@ ROLE_GUARDED: Final[dict[str, str]] = {
     "DELETE /v1/households": "owner",
     "PUT /v1/shopping-lists/export/targets/{target}": "owner",
     "DELETE /v1/shopping-lists/export/targets/{target}": "owner",
+    # The provider configuration screen, and the same argument arriving from the
+    # same side as the two rows above. `POST` accepts a household's own API key and
+    # dates an agreement in the household's name; `PATCH` rotates that key;
+    # `DELETE` retires it; the two consent routes give and take back the legal basis
+    # for sending what identifiable people eat, and who they are, to a company in
+    # another jurisdiction. A `viewer` could otherwise paste their own Anthropic key
+    # and consent on everybody's behalf. `probe` is here because it writes the
+    # capability columns the whole interface reads, on a configuration only an owner
+    # may have created. Reading the list stays open to every member: it discloses no
+    # credential, only the four characters that let a household recognise its key.
+    "POST /v1/providers": "owner",
+    "PATCH /v1/providers/{config_id}": "owner",
+    "DELETE /v1/providers/{config_id}": "owner",
+    "POST /v1/providers/{config_id}/consent": "owner",
+    "DELETE /v1/providers/{config_id}/consent": "owner",
+    "POST /v1/providers/{config_id}/probe": "owner",
     "POST /v1/inventory": "member",
     "PATCH /v1/inventory/{item_id}": "member",
     "DELETE /v1/inventory/{item_id}": "member",
+    "POST /v1/inventory/{item_id}/freeze": "member",
+    "POST /v1/inventory/{item_id}/thaw": "member",
     "POST /v1/locations": "member",
     "POST /v1/products": "member",
     "POST /v1/members": "member",
@@ -555,6 +596,16 @@ ROLE_GUARDED: Final[dict[str, str]] = {
     "POST /v1/shopping-lists/import/{import_id}/confirm": "member",
     "POST /v1/shopping-lists/{shopping_list_id}/export/{target}": "member",
     "POST /v1/tokens": "member",
+    # Who may *sign in* to the household. An invitation grants a membership, and
+    # a membership reads every eater's allergens and infant age band -- article 9
+    # health data -- so issuing one is the same kind of act as handing out the
+    # calendar credential above: owner. Removal is a member action because an
+    # owner evicting somebody and a member leaving are the same row going away,
+    # and `routers/memberships.py` decides which of the two is happening.
+    "GET /v1/households/invitations": "owner",
+    "POST /v1/households/invitations": "owner",
+    "DELETE /v1/households/invitations/{invitation_id}": "owner",
+    "DELETE /v1/households/members/{user_id}": "member",
     "DELETE /v1/tokens/{token_id}": "member",
 }
 

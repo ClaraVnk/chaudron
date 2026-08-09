@@ -30,8 +30,10 @@ from chaudron.api.routers import (
     export_targets_router,
     health_router,
     inventory_router,
+    invitation_redeem_router,
     locations_router,
     members_router,
+    memberships_router,
     privacy_router,
     products_router,
     providers_router,
@@ -53,6 +55,7 @@ from chaudron.infra.documents import (
     configure_document_sandbox,
     shutdown_document_sandbox,
 )
+from chaudron.infra.email import build_mailer
 from chaudron.infra.logging import configure_logging, household_id_var, request_id_var
 from chaudron.infra.openfoodfacts import OpenFoodFactsCatalog
 from chaudron.infra.passwords import Passwords
@@ -144,6 +147,23 @@ def build_throttles(
         machine_token_attempts=rate(
             "machine_token_attempts",
             settings.machine_token_attempts_per_ip_per_hour,
+            _AUTH_WINDOW_SECONDS,
+        ),
+        password_reset_requests=rate(
+            "password_reset_requests",
+            settings.password_reset_requests_per_ip_per_hour,
+            _AUTH_WINDOW_SECONDS,
+        ),
+        password_reset_attempts=rate(
+            "password_reset_attempts",
+            settings.password_reset_attempts_per_ip_per_hour,
+            _AUTH_WINDOW_SECONDS,
+        ),
+        # Keyed on the *recipient*: the one limiter here that protects somebody
+        # other than this instance (``api/throttling.py``).
+        account_emails=rate(
+            "account_emails",
+            settings.account_emails_per_address_per_hour,
             _AUTH_WINDOW_SECONDS,
         ),
     )
@@ -271,6 +291,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # and three passes -- and paying that per request would be a denial of
     # service of our own making (``infra/passwords.py``).
     app.state.passwords = Passwords()
+    # ``None`` when no relay is configured, which is a normal state for
+    # self-hosted software rather than a failure -- and the reason it is a value
+    # here rather than an exception at the first send. ``GET /v1/auth/capabilities``
+    # reports it and the reset routes answer ``503`` instead of accepting a request
+    # they cannot honour (``infra/email/smtp.py``).
+    app.state.mailer = build_mailer(resolved)
 
     # Middleware order matters and is not obvious: `add_middleware` *prepends*, so
     # the last call below is the outermost layer. Outer to inner, the stack ends up
@@ -366,6 +392,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(calendar_router)
     app.include_router(budget_router)
     app.include_router(members_router)
+    # Who may *sign in* to the household, and the invitations that produce
+    # them. Distinct from `members_router` above it, which owns the eaters:
+    # `domain/models.py` argues why the two are different tables.
+    app.include_router(memberships_router)
+    # Redemption sits under `/v1/auth` and is registered with the routers it
+    # belongs with rather than next to the auth router, because it is this
+    # change's route and not that module's. `routers/memberships.py` argues
+    # the placement: the redeemer has no membership to resolve a household
+    # from, so it is a route about the account.
+    app.include_router(invitation_redeem_router)
     app.include_router(balance_router)
     # The data-subject rights (GDPR 15, 17, 20). Registered last among the /v1
     # routers because it is the one that removes what the others wrote.

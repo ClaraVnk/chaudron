@@ -44,6 +44,7 @@ pytestmark = pytest.mark.integration
 DEFINERS: Final[tuple[tuple[str, str], ...]] = (
     ("chaudron_user_memberships", "uuid"),
     ("chaudron_resolve_machine_token", "text"),
+    ("chaudron_resolve_household_invitation", "text"),
 )
 
 

@@ -1,11 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiError, describeError } from '../../api/client';
-import { login, register, type Session } from '../../api/auth';
+import {
+  authCapabilities,
+  login,
+  register,
+  requestPasswordReset,
+  type Session,
+} from '../../api/auth';
 import { Button, Callout, Field } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
 import styles from './Auth.module.css';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot';
 
 /** The shortest password the server accepts. Quoted so the form can say it first. */
 const MIN_PASSWORD_LENGTH = 12;
@@ -17,18 +23,25 @@ interface Props {
 }
 
 /**
- * Sign in, or create an account and its first household.
+ * Sign in, create an account, or ask for a reset link.
  *
- * One screen with two modes rather than two routes: the application has no
- * router, and a person who mistyped their address should be one click from
- * creating the account rather than one navigation.
+ * One screen with three modes rather than three routes: the application has no
+ * router, and a person who mistyped their address should be one click from the
+ * next thing rather than one navigation.
  *
- * **What is deliberately missing: "forgot my password".** Chaudron sends no
- * email at all — there is no SMTP configuration anywhere in the project — and a
- * reset flow that does not verify an address is an unauthenticated way to take
- * over an account. Offering a link that leads to an apology is worse than not
- * offering it, so the screen says what actually helps: another owner of the
- * household can invite the person again.
+ * **"Forgot my password" exists now, and it did not.** The old copy on this
+ * screen said Chaudron sent no email at all and that the only way back was
+ * another owner re-inviting you — which is not a way back when the person locked
+ * out *is* the owner. It is shown only when the server says the instance has a
+ * mail relay (`GET /v1/auth/capabilities`), because a link that leads to an
+ * apology is worse than no link, which was the old copy's own argument.
+ *
+ * **Registration no longer signs anybody in, and the screen must not pretend
+ * otherwise.** The endpoint answers `202` whether or not the address already had
+ * an account, so that submitting the form is no longer a way to ask whether
+ * somebody has one here. The difference is sent to the mailbox instead. What the
+ * screen can honestly say afterwards is therefore the same sentence in both
+ * cases, and it is deliberately written to be true in both.
  */
 export function AuthScreen({ onSignedIn, expired = false }: Props) {
   const [mode, setMode] = useState<Mode>('login');
@@ -37,30 +50,60 @@ export function AuthScreen({ onSignedIn, expired = false }: Props) {
   const [displayName, setDisplayName] = useState('');
   const [householdName, setHouseholdName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resetOffered, setResetOffered] = useState(false);
+
+  // Asked once, on mount. A failure leaves `resetOffered` false, which hides the
+  // link: an instance we cannot ask about is treated as one that cannot send
+  // mail, which is the direction that fails towards an honest screen.
+  useEffect(() => {
+    const controller = new AbortController();
+    authCapabilities(controller.signal)
+      .then((capabilities) => {
+        setResetOffered(capabilities.password_reset);
+      })
+      .catch(() => {
+        /* No link. See above. */
+      });
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  const clear = () => {
+    setError(null);
+    setNotice(null);
+  };
 
   const submit = async () => {
-    setError(null);
+    clear();
     setBusy(true);
     try {
-      const session =
-        mode === 'login'
-          ? await login({ email, password })
-          : await register({
-              email,
-              password,
-              display_name: displayName,
-              household_name: householdName,
-            });
-      onSignedIn(session);
+      if (mode === 'login') {
+        onSignedIn(await login({ email, password }));
+      } else if (mode === 'register') {
+        const accepted = await register({
+          email,
+          password,
+          display_name: displayName,
+          household_name: householdName,
+        });
+        setNotice(accepted.email_available ? 'registered-with-email' : 'registered-no-email');
+        setMode('login');
+      } else {
+        await requestPasswordReset(email);
+        setNotice('reset-sent');
+      }
     } catch (cause) {
-      setError(messageFor(cause));
+      setError(messageFor(cause, mode));
     } finally {
       setBusy(false);
     }
   };
 
   const registering = mode === 'register';
+  const forgetting = mode === 'forgot';
 
   return (
     <main className={styles.screen}>
@@ -85,11 +128,17 @@ export function AuthScreen({ onSignedIn, expired = false }: Props) {
           void submit();
         }}
       >
-        <h2 className={styles.heading}>{registering ? 'Créer un compte' : 'Se connecter'}</h2>
+        <h2 className={styles.heading}>{HEADINGS[mode]}</h2>
 
         {error ? (
-          <Callout tone="danger" title="Connexion impossible">
+          <Callout tone="danger" title={forgetting ? 'Demande impossible' : 'Connexion impossible'}>
             {error}
+          </Callout>
+        ) : null}
+
+        {notice ? (
+          <Callout tone="info" title={NOTICES[notice].title}>
+            {NOTICES[notice].body}
           </Callout>
         ) : null}
 
@@ -115,29 +164,31 @@ export function AuthScreen({ onSignedIn, expired = false }: Props) {
           )}
         </Field>
 
-        <Field
-          label="Mot de passe"
-          required
-          hint={registering ? `Au moins ${String(MIN_PASSWORD_LENGTH)} caractères.` : undefined}
-        >
-          {({ id, describedBy, invalid }) => (
-            <input
-              id={id}
-              className={controlClass(invalid)}
-              type="password"
-              name="password"
-              autoComplete={registering ? 'new-password' : 'current-password'}
-              required
-              minLength={registering ? MIN_PASSWORD_LENGTH : undefined}
-              value={password}
-              aria-describedby={describedBy}
-              aria-invalid={invalid || undefined}
-              onChange={(event) => {
-                setPassword(event.target.value);
-              }}
-            />
-          )}
-        </Field>
+        {forgetting ? null : (
+          <Field
+            label="Mot de passe"
+            required
+            hint={registering ? `Au moins ${String(MIN_PASSWORD_LENGTH)} caractères.` : undefined}
+          >
+            {({ id, describedBy, invalid }) => (
+              <input
+                id={id}
+                className={controlClass(invalid)}
+                type="password"
+                name="password"
+                autoComplete={registering ? 'new-password' : 'current-password'}
+                required
+                minLength={registering ? MIN_PASSWORD_LENGTH : undefined}
+                value={password}
+                aria-describedby={describedBy}
+                aria-invalid={invalid || undefined}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                }}
+              />
+            )}
+          </Field>
+        )}
 
         {registering ? (
           <>
@@ -177,40 +228,123 @@ export function AuthScreen({ onSignedIn, expired = false }: Props) {
         ) : null}
 
         <Button type="submit" variant="primary" block loading={busy}>
-          {registering ? 'Créer le compte' : 'Se connecter'}
+          {ACTIONS[mode]}
         </Button>
 
+        {mode === 'login' && resetOffered ? (
+          <p className={styles.switch}>
+            <button
+              type="button"
+              className={styles.link}
+              onClick={() => {
+                setMode('forgot');
+                clear();
+              }}
+            >
+              Mot de passe oublié ?
+            </button>
+          </p>
+        ) : null}
+
         <p className={styles.switch}>
-          {registering ? 'Vous avez déjà un compte ?' : 'Pas encore de compte ?'}{' '}
+          {registering || forgetting ? 'Vous avez déjà un compte ?' : 'Pas encore de compte ?'}{' '}
           <button
             type="button"
             className={styles.link}
             onClick={() => {
               setMode(registering ? 'login' : 'register');
-              setError(null);
+              clear();
             }}
           >
             {registering ? 'Se connecter' : 'Créer un compte'}
           </button>
+          {forgetting ? (
+            <>
+              {' · '}
+              <button
+                type="button"
+                className={styles.link}
+                onClick={() => {
+                  setMode('login');
+                  clear();
+                }}
+              >
+                Revenir à la connexion
+              </button>
+            </>
+          ) : null}
         </p>
       </form>
 
-      <p className={styles.note}>
-        Mot de passe oublié ? Chaudron n’envoie aucun e-mail, il n’y a donc pas de réinitialisation
-        automatique. Demandez au propriétaire de votre foyer de vous réinviter.
-      </p>
+      {resetOffered ? null : (
+        <p className={styles.note}>
+          Cette instance Chaudron n’envoie aucun e-mail : il n’y a donc pas de réinitialisation
+          automatique du mot de passe. Demandez au propriétaire de votre foyer de vous réinviter.
+        </p>
+      )}
     </main>
   );
 }
 
+const HEADINGS: Record<Mode, string> = {
+  login: 'Se connecter',
+  register: 'Créer un compte',
+  forgot: 'Réinitialiser le mot de passe',
+};
+
+const ACTIONS: Record<Mode, string> = {
+  login: 'Se connecter',
+  register: 'Créer le compte',
+  forgot: 'Envoyer le lien',
+};
+
+type Notice = 'registered-with-email' | 'registered-no-email' | 'reset-sent';
+
+/**
+ * The three sentences shown after a form that answers `202`.
+ *
+ * Each is written to be **true whether or not the address already had an
+ * account**, which is the whole point: a message that said "your account was
+ * created" would be the enumeration oracle again, restated in French. So they say
+ * what was done — a message was sent, or would have been — and never what was
+ * found.
+ */
+const NOTICES: Record<Notice, { title: string; body: string }> = {
+  'registered-with-email': {
+    title: 'Vérifiez votre boîte aux lettres',
+    body:
+      'Un e-mail vient d’être envoyé à cette adresse. Il vous dira si le compte a été créé, ' +
+      'ou si un compte existait déjà — et, dans ce cas, comment y revenir. Vous pouvez ' +
+      'maintenant vous connecter.',
+  },
+  'registered-no-email': {
+    title: 'Demande enregistrée',
+    body:
+      'Vous pouvez maintenant vous connecter avec le mot de passe que vous venez de choisir. ' +
+      'Cette instance n’envoie pas d’e-mail : si la connexion échoue, cette adresse avait ' +
+      'peut-être déjà un compte, avec un autre mot de passe.',
+  },
+  'reset-sent': {
+    title: 'Vérifiez votre boîte aux lettres',
+    body:
+      'Si un compte existe pour cette adresse, un lien de réinitialisation vient d’y être ' +
+      'envoyé. Il est valable une heure et ne fonctionne qu’une fois. Un e-mail part dans ' +
+      'tous les cas, y compris pour vous dire qu’aucun compte n’existe ici.',
+  },
+};
+
 /** Server problems, turned into something a person can act on. */
-function messageFor(cause: unknown): string {
+function messageFor(cause: unknown, mode: Mode): string {
   if (cause instanceof ApiError) {
     switch (cause.problemType) {
       case 'invalid-credentials':
         return 'Adresse e-mail ou mot de passe incorrect.';
-      case 'email-already-registered':
-        return 'Un compte existe déjà pour cette adresse. Connectez-vous.';
+      case 'email-not-configured':
+        return (
+          'Cette instance Chaudron n’envoie aucun e-mail, il n’y a donc pas de ' +
+          'réinitialisation automatique. Demandez au propriétaire de votre foyer de vous ' +
+          'réinviter.'
+        );
       case 'password-too-weak':
         return `Le mot de passe doit faire au moins ${String(MIN_PASSWORD_LENGTH)} caractères.`;
       case 'invalid-email':
@@ -220,7 +354,9 @@ function messageFor(cause: unknown): string {
           ? `Trop de tentatives. Réessayez dans ${String(Math.ceil(cause.retryAfterSeconds / 60))} minute(s).`
           : 'Trop de tentatives. Réessayez plus tard.';
       case 'validation-failed':
-        return `Le mot de passe doit faire au moins ${String(MIN_PASSWORD_LENGTH)} caractères.`;
+        return mode === 'forgot'
+          ? 'Cette adresse e-mail n’est pas valide.'
+          : `Le mot de passe doit faire au moins ${String(MIN_PASSWORD_LENGTH)} caractères.`;
       default:
         break;
     }

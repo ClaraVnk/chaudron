@@ -57,6 +57,7 @@ from chaudron.services.dietary import DietaryService
 from chaudron.services.inventory import InventoryService
 from chaudron.services.locations import LocationService
 from chaudron.services.members import MemberService
+from chaudron.services.memberships import InvitationService, MembershipService
 from chaudron.services.privacy import PrivacyService
 from chaudron.services.products import ProductService
 from chaudron.services.providers import (
@@ -1075,3 +1076,24 @@ async def enforce_shopping_import_limits(
                 retry_after=exc.retry_after,
             ) from None
         yield
+
+
+# --------------------------------------------------------------------------- #
+# Household membership: the invitations, and the accounts they produce
+#
+# Appended here rather than filed beside the other service factories, for the
+# reason given above ``enforce_shopping_import_limits``: it keeps the rest of this
+# module untouched by a change several others are editing at the same time.
+# --------------------------------------------------------------------------- #
+
+
+def get_invitation_service(session: SessionDep) -> InvitationService:
+    return InvitationService(session)
+
+
+def get_membership_service(session: SessionDep) -> MembershipService:
+    return MembershipService(session)
+
+
+InvitationServiceDep = Annotated[InvitationService, Depends(get_invitation_service)]
+MembershipServiceDep = Annotated[MembershipService, Depends(get_membership_service)]

@@ -26,6 +26,18 @@ the tie has to be broken somewhere visible. Past feedback joins them as a fourth
 and last key (``services/recipe_feedback.py``): a dish the household dismissed
 sinks among suggestions already tied on everything above, and is never removed.
 
+*Frozen stock is shown to the model and governed by the application.* A lot in
+the freezer is real stock and stays in the inventory the model reads -- hiding it
+would tell a household with a full freezer that it owns nothing. What travels
+with it is one server-computed flag and one sentence of instruction: plan the
+thaw, and do not plan to refreeze. Neither of those is where the safety lives.
+The two rules that can hurt somebody are enforced where they cannot be argued
+with: a thawed lot is refused the freezer by ``services/inventory.py``, and the
+three days it then has are computed by ``domain/shelf_life.py`` and applied by
+every filter and every alarm in the application. The model is told what makes a
+suggestion *useful*; it is never the thing standing between a household and a
+refrozen chicken (ADR-0009, and the same division as allergens and preferences).
+
 *Every generated suggestion is written down.* ``recipe_suggestion`` keeps the
 provider mode, the model, the prompt version, the latency and the stock snapshot
 that produced it. What it deliberately does **not** keep is who it was cooked
@@ -623,6 +635,11 @@ def _snapshot(
                 "quantity": item.quantity,
                 "unit": item.unit,
                 "expires_in_days": item.expires_in_days,
+                # Without it the snapshot cannot explain the answer it exists to
+                # explain: "why did it tell me to thaw the chicken?" and "why did
+                # it give the chicken three months?" have the same one-word cause,
+                # and a snapshot holding only the date shows neither.
+                "frozen": item.frozen,
             }
             for item in request.inventory
         ],
@@ -635,6 +652,7 @@ def _to_provider_item(line: StockLine, today: date) -> ProviderInventoryItem:
         quantity=line.quantity,
         unit=line.unit,
         expires_in_days=line.days_left(today),
+        frozen=line.frozen,
     )
 
 

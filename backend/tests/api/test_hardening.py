@@ -9,6 +9,7 @@ and AUD-026 (three spellings of one household).
 from __future__ import annotations
 
 import base64
+import os
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -345,8 +346,24 @@ def test_debug_logging_is_refused_in_production() -> None:
         build_settings(env="production", base_url="https://chaudron.example.org", log_level="DEBUG")
 
 
-def test_the_environment_has_no_default() -> None:
-    """A blank ``CHAUDRON_ENV`` used to mean ``local``, which opens /docs and drops HSTS."""
+def test_the_environment_has_no_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blank ``CHAUDRON_ENV`` used to mean ``local``, which opens /docs and drops HSTS.
+
+    The process environment is cleared of every ``CHAUDRON_`` variable first, and
+    that is the whole reason this test is worth reading. ``Settings`` is a
+    ``BaseSettings``: omitting a key from the constructor does not make it absent,
+    it makes it fall through to the environment. So this test asserted "``env`` is
+    required" while actually asserting "``env`` is required *and* nobody exported
+    ``CHAUDRON_ENV``" -- true on a developer's machine, false on CI, where the
+    pytest job sets it at job level. It passed locally and failed on the first CI
+    run of this branch.
+
+    Clearing by prefix rather than by name, because the next required setting
+    added here would reintroduce the same hole under a different variable.
+    """
+    for name in [key for key in os.environ if key.startswith("CHAUDRON_")]:
+        monkeypatch.delenv(name)
+
     values = {key: value for key, value in _BASE_SETTINGS.items() if key != "env"}
     with pytest.raises(ValidationError, match=r"env"):
         Settings(**values)

@@ -8,6 +8,8 @@ import { useSession } from './context/sessionContext';
 import { AccountMenu } from './features/auth/AccountMenu';
 import { AuthScreen } from './features/auth/AuthScreen';
 import { HouseholdPicker } from './features/auth/HouseholdPicker';
+import { PasswordResetScreen } from './features/auth/PasswordResetScreen';
+import { takeResetToken } from './features/auth/resetLink';
 import { AddItemScreen } from './features/add/AddItemScreen';
 import { BudgetScreen } from './features/budget/BudgetScreen';
 import { HouseholdScreen } from './features/household/HouseholdScreen';
@@ -172,6 +174,26 @@ function Shell({ tab, onTabChange }: ShellProps) {
 function Gate({ tab, onTabChange }: ShellProps) {
   const { session, loading, activeHousehold, adopt, selectHousehold, signOut } = useSession();
   const [wasSignedIn, setWasSignedIn] = useState(false);
+  // Read once, on the first render, and removed from the address bar by the same
+  // call (`features/auth/resetLink.ts`). The lazy initialiser is what keeps it
+  // from being read again on every re-render, when it is already gone.
+  const [resetToken, setResetToken] = useState<string | null>(takeResetToken);
+
+  // Before the session check, deliberately. Somebody following a reset link on a
+  // device where they are still signed in has a specific intention, and it is not
+  // "look at my inventory" — most likely they are resetting *because* they think
+  // a session is not theirs. Completing the reset revokes every session anyway,
+  // so the screen underneath would be stale within the second.
+  if (resetToken !== null) {
+    return (
+      <PasswordResetScreen
+        token={resetToken}
+        onDone={() => {
+          setResetToken(null);
+        }}
+      />
+    );
+  }
 
   if (loading) {
     // No spinner: the check is one request against a warm connection, and a

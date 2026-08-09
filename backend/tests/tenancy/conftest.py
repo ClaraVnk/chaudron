@@ -63,7 +63,14 @@ PROTECTED_TABLES: Final[tuple[Table, ...]] = tuple(
 _COLUMN_OVERRIDES: Final[Mapping[str, Mapping[str, Any]]] = {
     # ck_llm_provider_config_mode_requirements: `byok` demands a ciphertext,
     # `ollama` a base URL; `instance_owner` is the one mode that needs neither.
-    "llm_provider_config": {"mode": "instance_owner"},
+    # ck_llm_provider_config_consent_required_by_mode (revision `0021`): every
+    # mode but `ollama` must carry a consent, and `consented_at` is nullable so
+    # the generator leaves it alone. The value only has to exist; this fixture
+    # asserts isolation, not what a household agreed to.
+    "llm_provider_config": {
+        "mode": "instance_owner",
+        "consented_at": dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+    },
     # ck_shopping_list_item_target_present: a line points at a product or carries
     # a label, and the generator leaves nullable foreign keys alone.
     "shopping_list_item": {"label": "row-level security fixture"},
@@ -75,6 +82,10 @@ _COLUMN_OVERRIDES: Final[Mapping[str, Mapping[str, Any]]] = {
     # the empty array the generator would produce is refused. `_synthesise` has
     # no rule for an array column either, which this override makes moot.
     "machine_token": {"scopes": ["inventory:read"]},
+    # ck_household_invitation_role_not_owner: the generator picks the first
+    # member of an enum, which for membership_role is exactly the one value an
+    # invitation may never carry.
+    "household_invitation": {"role": "member"},
 }
 
 

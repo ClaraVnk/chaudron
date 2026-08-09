@@ -421,6 +421,15 @@ class StockLine:
     quantity: str
     unit: str
     expires_on: date | None
+    #: Currently in the household's freezer -- frozen, and not since thawed.
+    #:
+    #: Carried beside ``expires_on`` rather than inferred from it, because the two
+    #: say different things and only one of them is visible in a date: a frozen
+    #: chicken breast and a sealed packet of rice can both read "in three months",
+    #: and only one of them needs taking out the night before. Defaulted so that
+    #: every existing construction of this line keeps the meaning it was written
+    #: with.
+    frozen: bool = False
 
     def days_left(self, today: date) -> int | None:
         return None if self.expires_on is None else (self.expires_on - today).days

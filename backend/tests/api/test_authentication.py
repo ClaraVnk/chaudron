@@ -39,6 +39,15 @@ from tests.conftest import (
 async def test_registration_creates_an_account_a_household_and_an_owner(
     anonymous_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """The rows are written; the *response* says nothing about them.
+
+    Registration answers ``202`` and starts no session, and that is not a
+    regression: a session can only be minted on the branch where the address was
+    free, so returning one announced which branch the request took -- the
+    enumeration oracle, restated as a status code (pentest finding O-10f). The
+    account is created and immediately usable through ``POST /v1/auth/login``,
+    which is what this asserts.
+    """
     response = await anonymous_client.post(
         "/v1/auth/register",
         json={
@@ -48,27 +57,32 @@ async def test_registration_creates_an_account_a_household_and_an_owner(
             "household_name": "Chez Nouvelle",
         },
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
-
-    assert body["email"] == "nouvelle@example.test", "the address is normalised on the way in"
-    assert len(body["households"]) == 1
-    assert body["households"][0]["name"] == "Chez Nouvelle"
-    assert body["households"][0]["role"] == "owner"
-    assert body["csrf_token"]
-
-    # And the session is usable straight away, from the cookie the response set.
-    assert SESSION_COOKIE in response.cookies
-    listing = await anonymous_client.get("/v1/locations", headers={CSRF_HEADER: body["csrf_token"]})
-    assert listing.status_code == 200
+    assert response.status_code == 202, response.text
+    assert response.json() == {"status": "accepted", "email_available": False}
+    assert SESSION_COOKIE not in response.cookies, "registration must not hand out a session"
 
     stored = await db_session.scalar(
         select(UserAccount).where(UserAccount.email == "nouvelle@example.test")
     )
-    assert stored is not None
+    assert stored is not None, "the address is normalised on the way in"
     assert stored.password_hash is not None
     assert stored.password_hash.startswith("$argon2id$"), "Argon2id, not bcrypt and not PBKDF2"
     assert TEST_PASSWORD not in stored.password_hash
+
+    # And the account works straight away, with the password just chosen.
+    signed_in = await anonymous_client.post(
+        "/v1/auth/login",
+        json={"email": "nouvelle@example.test", "password": "un-mot-de-passe-assez-long"},
+    )
+    assert signed_in.status_code == 200, signed_in.text
+    body = signed_in.json()
+    assert len(body["households"]) == 1
+    assert body["households"][0]["name"] == "Chez Nouvelle"
+    assert body["households"][0]["role"] == "owner"
+
+    assert SESSION_COOKIE in signed_in.cookies
+    listing = await anonymous_client.get("/v1/locations", headers={CSRF_HEADER: body["csrf_token"]})
+    assert listing.status_code == 200
 
 
 async def test_the_session_cookie_is_host_prefixed_httponly_secure_and_lax(
@@ -77,13 +91,21 @@ async def test_the_session_cookie_is_host_prefixed_httponly_secure_and_lax(
     """Every attribute that makes the cookie safe, asserted on the wire.
 
     Read off the raw ``Set-Cookie`` header rather than a parsed jar, because the
-    jar drops exactly the attributes under test.
+    jar drops exactly the attributes under test. Driven from sign-in rather than
+    sign-up: registration stopped issuing a cookie when it stopped distinguishing
+    between a free address and a taken one.
     """
+    assert (
+        await anonymous_client.post(
+            "/v1/auth/register",
+            json={"email": "cookie@example.test", "password": "un-mot-de-passe-assez-long"},
+        )
+    ).status_code == 202
     response = await anonymous_client.post(
-        "/v1/auth/register",
+        "/v1/auth/login",
         json={"email": "cookie@example.test", "password": "un-mot-de-passe-assez-long"},
     )
-    assert response.status_code == 201
+    assert response.status_code == 200
     raw = response.headers["set-cookie"]
 
     assert raw.startswith(f"{SESSION_COOKIE}="), "the __Host- prefix is what forbids a Domain"
@@ -99,8 +121,14 @@ async def test_the_stored_token_is_a_digest_not_the_cookie(
     anonymous_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     """A dump of ``user_session`` must not yield a single usable session."""
+    assert (
+        await anonymous_client.post(
+            "/v1/auth/register",
+            json={"email": "digest@example.test", "password": "un-mot-de-passe-assez-long"},
+        )
+    ).status_code == 202
     response = await anonymous_client.post(
-        "/v1/auth/register",
+        "/v1/auth/login",
         json={"email": "digest@example.test", "password": "un-mot-de-passe-assez-long"},
     )
     token = response.cookies[SESSION_COOKIE]
@@ -112,16 +140,31 @@ async def test_the_stored_token_is_a_digest_not_the_cookie(
 
 
 async def test_a_second_account_cannot_take_the_same_address(
-    anonymous_client: httpx.AsyncClient,
+    anonymous_client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """No second row, and -- the point -- no way to tell from the response.
+
+    The full comparison of the two answers, byte for byte and header for header,
+    lives in ``tests/api/test_password_reset.py``; this one keeps the *behaviour*
+    assertion next to the rest of the registration tests: the address stays with
+    the first account.
+    """
     payload = {"email": "twice@example.test", "password": "un-mot-de-passe-assez-long"}
-    assert (await anonymous_client.post("/v1/auth/register", json=payload)).status_code == 201
+    first = await anonymous_client.post("/v1/auth/register", json=payload)
+    assert first.status_code == 202
 
     again = await anonymous_client.post(
         "/v1/auth/register", json={**payload, "email": "TWICE@example.test"}
     )
-    assert again.status_code == 409
-    assert again.json()["type"].endswith("/email-already-registered")
+    assert again.status_code == 202
+    assert again.json() == first.json(), "the second answer must not differ from the first"
+
+    accounts = list(
+        await db_session.scalars(
+            select(UserAccount).where(UserAccount.email == "twice@example.test")
+        )
+    )
+    assert len(accounts) == 1, "the address was not taken twice"
 
 
 async def test_a_short_password_is_refused(anonymous_client: httpx.AsyncClient) -> None:
@@ -692,4 +735,7 @@ def _throttles(app: FastAPI, *, logins: int) -> Throttles:
         login_attempts_by_account=rate("login_attempts_by_account", logins, 3600.0),
         registrations=rate("registrations", logins, 3600.0),
         machine_token_attempts=rate("machine_token_attempts", logins, 3600.0),
+        password_reset_requests=rate("password_reset_requests", logins, 3600.0),
+        password_reset_attempts=rate("password_reset_attempts", logins, 3600.0),
+        account_emails=rate("account_emails", logins, 3600.0),
     )

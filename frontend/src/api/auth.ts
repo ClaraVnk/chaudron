@@ -55,8 +55,92 @@ export function login(credentials: Credentials, signal?: AbortSignal): Promise<S
   return request<Session>('/auth/login', { method: 'POST', body: credentials, signal });
 }
 
-export function register(payload: Registration, signal?: AbortSignal): Promise<Session> {
-  return request<Session>('/auth/register', { method: 'POST', body: payload, signal });
+/** What registration answers. Notably **not** a `Session`. */
+export interface RegistrationAccepted {
+  status: 'accepted';
+  /**
+   * Whether this instance has a mail relay at all — a property of the
+   * deployment, identical for every address, and therefore not a hint about the
+   * one submitted. It decides which sentence the screen shows next, nothing else.
+   */
+  email_available: boolean;
+}
+
+/**
+ * Ask for an account. The answer is the same whether or not the address had one.
+ *
+ * It used to answer `201` with a session for a free address and `409` for a taken
+ * one, which let anybody ask whether an address had an account here. It now
+ * answers `202` either way — and, since a session could only be minted on one of
+ * the two branches, it no longer returns one at all. The difference is sent to
+ * the mailbox, which is the only party entitled to it.
+ *
+ * So the caller must send the person to the sign-in form afterwards, with the
+ * password they just chose. There is nothing to adopt.
+ */
+export function register(
+  payload: Registration,
+  signal?: AbortSignal,
+): Promise<RegistrationAccepted> {
+  return request<RegistrationAccepted>('/auth/register', {
+    method: 'POST',
+    body: payload,
+    signal,
+  });
+}
+
+/** What this instance can do for somebody who is not signed in. */
+export interface AuthCapabilities {
+  /** False when no SMTP relay is configured; the screen then offers no link. */
+  password_reset: boolean;
+}
+
+/**
+ * Whether a password can be reset here at all.
+ *
+ * Asked before the screen renders, so that an instance with no mail relay shows
+ * the honest sentence instead of a link that leads to a `503`. The same pattern
+ * `GET /v1/providers/capabilities` uses: ask what exists rather than discover it
+ * from a failure.
+ */
+export function authCapabilities(signal?: AbortSignal): Promise<AuthCapabilities> {
+  return request<AuthCapabilities>('/auth/capabilities', { signal });
+}
+
+/**
+ * Ask for a reset link.
+ *
+ * Answers `202` with a constant body whether or not the address has an account,
+ * and a message is sent either way — including one saying there is no account
+ * here, so "nothing arrived" is never the answer somebody is left with. The only
+ * failures worth branching on are `503` (this instance sends no mail) and `429`.
+ */
+export function requestPasswordReset(email: string, signal?: AbortSignal): Promise<void> {
+  return request<void>('/auth/password/reset-request', {
+    method: 'POST',
+    body: { email },
+    signal,
+  });
+}
+
+export interface PasswordResetCompletion {
+  token: string;
+  new_password: string;
+}
+
+/**
+ * Set a new password from a link, and be signed out everywhere.
+ *
+ * Answers `204` and **no session**: following a link from an inbox proves control
+ * of a mailbox, not knowledge of a password, so the person signs in afterwards.
+ * Every session of the account is revoked server-side, which is what makes a
+ * reset a remedy for a compromise rather than only a convenience.
+ */
+export function completePasswordReset(
+  payload: PasswordResetCompletion,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request<void>('/auth/password/reset', { method: 'POST', body: payload, signal });
 }
 
 export function logout(signal?: AbortSignal): Promise<void> {
@@ -83,10 +167,12 @@ export function revokeAllSessions(signal?: AbortSignal): Promise<Session> {
 /**
  * Replace the password, having proved the current one.
  *
- * The current password is required and there is no way round it: this instance
- * has no outbound mail, so there is no reset link and nothing else that can stand
- * in for "you are this person". A forgotten password is a forgotten account, and
- * the interface says so rather than offering a recovery path that does not exist.
+ * The current password is still required, and the reset flow does not change
+ * that: this call is made from a live session, which proves nothing about who is
+ * holding it, so skipping the check would turn a stolen cookie into a permanent
+ * takeover. Somebody who cannot supply the old password uses
+ * `requestPasswordReset` instead, and proves control of the address rather than
+ * knowledge of a secret.
  */
 export function changePassword(payload: PasswordChange, signal?: AbortSignal): Promise<Session> {
   return request<Session>('/auth/password', { method: 'POST', body: payload, signal });

@@ -146,6 +146,12 @@ WITHHELD_COLUMNS: Final[Mapping[tuple[str, str], str]] = {
         "The lookup key of a live bearer credential. The token itself left this "
         "instance once, at creation; prefix and last4 are what identify it here."
     ),
+    ("household_invitation", "token_hash"): (
+        "The lookup key of a pending invitation, which is a bearer credential for "
+        "membership of this household. Same reasoning as machine_token.token_hash, "
+        "and it bites harder: an export naming a live invitation would be a way in "
+        "for whoever reads the file. prefix and last4 identify it here."
+    ),
 }
 
 #: Held about the household and outside the export, with the reason. Rendered into

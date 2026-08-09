@@ -248,6 +248,60 @@ async def opt_into_budget(page: Page) -> None:
     await settle(page)
 
 
+async def freeze_first_item(page: Page) -> Path | None:
+    """Freeze the first lot that offers the action, and frame the result.
+
+    Two clicks rather than one, because the interface deliberately puts advice
+    between them: for the families where freezing is inadvisable the note says so
+    *before* the door closes. Walking through both is also what makes this a
+    picture of the feature and not of a button.
+
+    Returns ``None`` — and says why on stderr — when no row offers the action.
+    Every seeded lot could already be frozen, or the seed could change; failing
+    the whole run for a missing screenshot would cost the captures already taken.
+    """
+    # Chicken by preference, and not for the seed's sake. `fresh_meat` is one of
+    # only three families the keeping table will put a freezer figure on, so it
+    # is where the headline behaviour is visible: a use-by two days out becomes a
+    # date three months out, while the printed date stays on the row as a
+    # footnote. Freezing whichever row sorts first lands on a family with no
+    # figure, which photographs "Sans date" -- correct, subtle, and not the thing
+    # a reader opened the README to understand.
+    meat = page.locator("li", has_text="poulet").get_by_role("button", name="Congeler")
+    freeze = meat.first if await meat.count() > 0 else page.get_by_role("button", name="Congeler")
+    if await freeze.count() == 0:
+        sys.stderr.write("  no freezable lot in this inventory; skipping the freezing shot\n")
+        return None
+    freeze = freeze.first
+
+    await freeze.click()
+    await page.get_by_role("button", name="Confirmer la congélation").first.click()
+    await settle(page)
+    # The badge sits on the row, not at the top of the list: frame the row.
+    row = page.locator('[class*="itemRow"], li').filter(has_text="congelé").first
+    if await row.count() > 0:
+        await row.evaluate("el => el.scrollIntoView({block: 'center'})")
+        await page.wait_for_timeout(400)
+    return await shoot(page, "freezing", "narrow")
+
+
+async def shoot_household_access(page: Page) -> Path | None:
+    """Frame the accounts half of the household tab, below the eaters."""
+    # "Accès au foyer" and not "Invitations en attente": the second only renders
+    # once one exists, and creating one to be photographed would put a live
+    # invitation code in a picture that ends up in a README. The code is
+    # worthless -- a throwaway instance, a seeded household -- but a screenshot
+    # showing a credential being handed around teaches the habit whether or not
+    # this particular one matters.
+    heading = page.get_by_role("heading", name="Accès au foyer").first
+    if await heading.count() == 0:
+        sys.stderr.write("  no access panel on this screen; skipping\n")
+        return None
+    await heading.evaluate("el => el.scrollIntoView({block: 'center'})")
+    await page.wait_for_timeout(400)
+    return await shoot(page, "household-access", "narrow")
+
+
 async def suggest_recipes(page: Page) -> None:
     """Ask for suggestions, wait out the model, and frame the answer.
 
@@ -315,6 +369,14 @@ async def capture_set(browser: Browser, form_factor: str) -> list[Path]:
     await scroll_past_banner(page)
     keep(await shoot(page, f"inventory{suffix}", form_factor))
 
+    if form_factor == "narrow":
+        # Freezing, photographed by actually doing it rather than by seeding a
+        # frozen row. The interesting frame is *after* the action: the badge, and
+        # a date that has moved from days to months on a lot whose printed use-by
+        # has not changed at all. Seeding it would have produced the same picture
+        # and proved nothing about the button.
+        keep(await freeze_first_item(page))
+
     await tab(page, "Courses")
     await scroll_past_banner(page)
     keep(await shoot(page, f"courses{suffix}", form_factor))
@@ -346,6 +408,22 @@ async def capture_set(browser: Browser, form_factor: str) -> list[Path]:
         await tab(page, "Foyer")
         await scroll_past_banner(page)
         keep(await shoot(page, "household", form_factor))
+
+        # The same tab, further down. Two screens in one route, and they answer
+        # different questions: the top is *who we cook for* (eaters, with their
+        # allergens), this is *who may sign in* (accounts, with their roles).
+        # Confusing the two is the mistake the panel's own first paragraph warns
+        # about, so photographing only the top would perpetuate it.
+        keep(await shoot_household_access(page))
+
+        # The provider screen renders on the recipes tab exactly while no
+        # provider is configured, which is the state a fresh instance is in --
+        # so this is the first thing a new household actually sees there, and
+        # until this release it was 47 lines of prose telling them to edit the
+        # server's environment.
+        await tab(page, "Recettes")
+        await scroll_past_banner(page)
+        keep(await shoot(page, "provider-setup", form_factor))
 
     await tab(page, "Recettes")
     await scroll_past_banner(page)

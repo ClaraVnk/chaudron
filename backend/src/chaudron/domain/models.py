@@ -244,16 +244,6 @@ class LlmProviderMode(enum.StrEnum):
     INSTANCE_OWNER = "instance_owner"
 
 
-class LlmPurpose(enum.StrEnum):
-    """Receipt parsing needs vision, recipe generation does not.
-
-    Hence a binding per purpose rather than a single provider per household.
-    """
-
-    RECIPE_GENERATION = "recipe_generation"
-    RECEIPT_PARSING = "receipt_parsing"
-
-
 class LlmConfigStatus(enum.StrEnum):
     UNVERIFIED = "unverified"
     VERIFIED = "verified"
@@ -688,6 +678,78 @@ class UserSession(UuidPkMixin, Base):
         Index("uq_user_session_token_hash", "token_hash", unique=True),
         # "Revoke everything for this account", and the expiry sweep.
         Index("ix_user_session_user_id", "user_id"),
+    )
+
+
+class PasswordResetToken(UuidPkMixin, Base):
+    """One outstanding "let me choose a new password" link.
+
+    The same shape as :class:`UserSession` and ``machine_token``, deliberately and
+    to the letter: a random secret handed out once, stored as a SHA-256 digest,
+    with an expiry and a revocation column. A third invention here would be a
+    third set of rules to keep in step, and the one that drifted would be the one
+    guarding the only unauthenticated path into an account.
+
+    **Single use, and the column that says so is ``consumed_at``.** It is set both
+    when a token is used and when it is superseded -- by another reset request, by
+    a password change, or by a completed reset -- so "the password changed" and
+    "every outstanding link is dead" are one write rather than two facts that can
+    disagree. A link left in an inbox after the password moved on is a key to a
+    door that has been rekeyed, and it must not open it.
+
+    **The plaintext is hexadecimal, and that is a logging decision.**
+    ``services/auth.py`` generates it with ``secrets.token_hex``, so the value is
+    64 unbroken alphanumeric characters -- which is exactly the shape
+    ``infra/redaction.py`` blanks on sight. The token is never logged in the first
+    place; making it *redactable* is the second lock, for the log line somebody
+    adds in a hurry two years from now. A URL-safe base64 value would have carried
+    ``-`` and ``_``, each of which breaks the run the redactor looks for, and
+    would have survived a log line intact.
+
+    **No tenant column**, for the same reason as ``user_session``: the row belongs
+    to an *account*, an account may open several households, and none of them is
+    known -- or knowable -- at the moment a stranger asks for a link. It is
+    declared in the tenancy guard's ``GLOBAL_TABLES`` with that reason.
+
+    **Nothing here records who asked.** No source address, no user agent. The row
+    exists to authorise one password change and is deleted with the account; a
+    column naming the requester would be personal data retained past the request
+    that produced it, for no question anybody has to answer.
+    """
+
+    __tablename__ = "password_reset_token"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment=(
+            "SHA-256 of the value that went out in the message, lowercase hex. The "
+            "plaintext is never stored: a dump of this table opens no account."
+        ),
+    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    expires_at: Mapped[datetime]
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        comment=(
+            "Set when the link is followed, and also when it is superseded by a "
+            "later request, a password change or a completed reset. A used token "
+            "and an expired one are one answer at the API."
+        )
+    )
+
+    __table_args__ = (
+        # Unique because it is the lookup key, and because two links sharing a
+        # digest would mean the generator broke. Global rather than composite for
+        # the reason ``uq_machine_token_token_hash`` gives: the digest is what
+        # *decides* the account, so a composite index would have to be probed with
+        # the answer it is being asked for.
+        Index("uq_password_reset_token_hash", "token_hash", unique=True),
+        # "Kill every outstanding link for this account", which runs on every
+        # password change and every completed reset.
+        Index("ix_password_reset_token_user_id", "user_id"),
     )
 
 
@@ -1140,6 +1202,27 @@ class ShelfLifeGuideline(Base):
     source_url: Mapped[str] = mapped_column(Text())
     note: Mapped[str | None] = mapped_column(Text())
 
+    #: How long a lot of this family keeps once *the household* froze it.
+    #: NULL means no date is proposed, which covers two different cases the note
+    #: beside it has to tell apart: no honest figure exists (a vegetable's answer
+    #: depends on whether it was blanched), or freezing is inadvisable (a shell
+    #: egg cracks, a sealed tin bursts). Neither means "keeps indefinitely".
+    home_frozen_days: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        comment=(
+            "Days a home-frozen lot of this family keeps. NULL means no date is "
+            "proposed -- either no honest figure exists or freezing is "
+            "inadvisable; never 'indefinitely'. See freezing_note."
+        ),
+    )
+    freezing_note: Mapped[str | None] = mapped_column(
+        Text(),
+        comment=(
+            "Why home_frozen_days is what it is, or why there is none. Shown "
+            "beside a proposed date, in the same register as note."
+        ),
+    )
+
     __table_args__ = (
         CheckConstraint(
             "(unopened_days IS NULL OR unopened_days > 0)"
@@ -1153,6 +1236,15 @@ class ShelfLifeGuideline(Base):
             name="some_duration",
         ),
         CheckConstraint("date_kind <> 'unknown'", name="date_kind_known"),
+        # Same shape as `durations_positive`, and deliberately not folded into it:
+        # a freezer figure is a positive number of days or it is absent. Zero
+        # would say "unfit the day it was frozen", which no source here states.
+        # It is *not* covered by `some_duration` either -- a family may honestly
+        # have fresh durations and no freezer one.
+        CheckConstraint(
+            "home_frozen_days IS NULL OR home_frozen_days > 0",
+            name="home_frozen_days_positive",
+        ),
     )
 
 
@@ -1432,6 +1524,39 @@ class InventoryLot(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
     # never stored: opening a jar would invalidate the stored value.
     opened_at: Mapped[date | None]
 
+    #: When *this household* put the lot in its own freezer, and the mirror of
+    #: `opened_at`: one brings the date forward, this one replaces it.
+    #:
+    #: Do not read it as "this is a frozen product". `product.food_family =
+    #: 'frozen'` means sold frozen -- a bag of peas, whose printed date applies
+    #: normally and which was never in this state. A chicken breast bought fresh
+    #: and frozen the same evening stays `fresh_meat`; the lot is what changed,
+    #: not the product, and `domain/shelf_life.py` says why conflating the two
+    #: would hand it the printed date of an industrial product it is not.
+    #:
+    #: Freezing **voids the printed date** rather than extending it: ANSES is
+    #: explicit that the clock stops, and a new one starts from here.
+    frozen_at: Mapped[date | None] = mapped_column(
+        comment=(
+            "When this household froze this lot itself. Distinct from "
+            "product.food_family = 'frozen', which means sold frozen. Voids "
+            "best_before and starts a new clock; see domain/shelf_life.py."
+        )
+    )
+    #: When it came back out, and the reason both columns exist rather than one
+    #: `is_frozen` flag. Thawing is not the absence of freezing: it starts the
+    #: shortest clock in the whole application -- three days, ANSES -- and it
+    #: forbids going back. A lot that was frozen and thawed carries *both* dates,
+    #: and the expiry rule reads this one first precisely so that it answers
+    #: "three days" and not "three months".
+    thawed_at: Mapped[date | None] = mapped_column(
+        comment=(
+            "When this lot was taken out of the freezer. Starts the ANSES "
+            "three-day clock and forbids refreezing. Read before frozen_at by "
+            "the expiry rule: a thawed lot carries both dates."
+        )
+    )
+
     acquired_on: Mapped[date | None]
     unit_price: Mapped[Decimal | None] = mapped_column(MONEY)
     currency: Mapped[str | None] = mapped_column(String(3))
@@ -1487,6 +1612,24 @@ class InventoryLot(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
         CheckConstraint(
             "best_before IS NOT NULL OR expiry_date_source = 'declared'",
             name="estimate_needs_a_date",
+        ),
+        # Deliberately *not* "thawed implies frozen". A pack bought already frozen
+        # is thawed by a household that never froze it, so `frozen_at` is legitimately
+        # NULL beside a `thawed_at`. What cannot happen in either case is coming out
+        # before going in.
+        CheckConstraint(
+            "frozen_at IS NULL OR thawed_at IS NULL OR thawed_at >= frozen_at",
+            name="thaw_follows_freeze",
+        ),
+        # "What is in the freezer", which is a screen of its own and also the set the
+        # expiry rule treats differently. Partial on the *currently* frozen: a lot
+        # that has been thawed is back on the ordinary clock and belongs to the
+        # listings that already have their own index.
+        Index(
+            "ix_inventory_lot_frozen",
+            "household_id",
+            "frozen_at",
+            postgresql_where=text("frozen_at IS NOT NULL AND thawed_at IS NULL"),
         ),
         # THE merge key. Scanning the same pack twice yields one lot, not two, and the
         # upsert is atomic so two phones scanning at once cannot race.
@@ -1920,11 +2063,10 @@ class ReceiptLine(UuidPkMixin, HouseholdScopedMixin, Base):
 class LlmProviderConfig(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
     """One household's access to a model: mode, endpoint, model, encrypted key.
 
-    Credential and assignment are separate entities on purpose (see
-    ``LlmPurposeBinding``): an API key must exist in exactly one place, or the
-    household that uses it for two purposes has to rotate it twice -- and the day it
-    rotates only one, half the application fails with ``invalid_credentials`` for no
-    visible reason.
+    **One live row per household**, enforced by
+    ``uq_llm_provider_config_household_active`` below. Archived rows are excluded
+    from it, so retiring a configuration and registering its replacement remains
+    possible; what cannot exist is two usable at once.
     """
 
     __tablename__ = "llm_provider_config"
@@ -2070,6 +2212,29 @@ class LlmProviderConfig(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base)
             " OR (consented_at IS NOT NULL AND consent_revoked_at >= consented_at)",
             name="revocation_follows_consent",
         ),
+        # Deferred by revision 0016 to "the registration route that can guarantee the
+        # invariant on insert"; added by 0021 once that route existed. A row that
+        # transmits to a third party carries an agreement, or it does not exist.
+        #
+        # Spelled by mode here although the *gate* no longer is (see
+        # `ProviderService._consent_refusal`, which asks whether `base_url` is
+        # loopback or otherwise non-routable rather than what the enum says). A CHECK
+        # cannot classify an endpoint -- it would have to parse a URL and resolve a
+        # name, and PostgreSQL refuses non-immutable expressions outright. So the
+        # database holds the half it can hold totally, the two modes that transmit
+        # unconditionally, and the application holds the half that depends on where
+        # the endpoint is. Neither states more than it enforces.
+        #
+        # Deployed `NOT VALID`: rows predating 0016 may violate it, 0016 refused to
+        # invent a consent for them, and validating would have aborted the upgrade to
+        # buy an invariant the gate already applies to those rows. Every INSERT and
+        # UPDATE is checked regardless, which is what makes new rows correct by
+        # construction. The flag is not expressible here and does not need to be --
+        # `Base.metadata` is compared to the catalogue by name.
+        CheckConstraint(
+            "mode = 'ollama' OR consented_at IS NOT NULL",
+            name="consent_required_by_mode",
+        ),
         # The refused case has to be as cheap as the banner reporting it: every
         # recipe suggestion and every receipt import loads the household's active
         # configurations and now reads these two columns.
@@ -2080,9 +2245,22 @@ class LlmProviderConfig(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base)
                 "archived_at IS NULL AND (consented_at IS NULL OR consent_revoked_at IS NOT NULL)"
             ),
         ),
+        # One household, one live configuration -- the rule itself, not an index
+        # that happens to help. Partial on `archived_at IS NULL` so the archive
+        # keeps every retired row (art. 15 asks what was authorised and when it
+        # stopped) while the live set stays a set of one.
+        #
+        # A pre-check in `ProviderConfigService.create` gives the household a
+        # sentence rather than an `IntegrityError`; this index is what makes the
+        # rule true when two owners press "create" at the same instant, and the
+        # service turns its violation into the same refusal.
+        #
+        # It also serves the lookup it replaced: every recipe suggestion and every
+        # receipt import reads exactly this predicate.
         Index(
-            "ix_llm_provider_config_household_active",
+            "uq_llm_provider_config_household_active",
             "household_id",
+            unique=True,
             postgresql_where=text("archived_at IS NULL"),
         ),
         # "Your key no longer works" banner, shown on every page: must be free.
@@ -2090,37 +2268,6 @@ class LlmProviderConfig(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base)
             "ix_llm_provider_config_invalid",
             "household_id",
             postgresql_where=text("status = 'invalid_credentials'"),
-        ),
-    )
-
-
-class LlmPurposeBinding(Base):
-    """Which configuration serves which purpose, for one household.
-
-    Composite primary key ``(household_id, purpose)``: at most one active
-    configuration per purpose, with no "is_active" flag to demote and therefore no
-    window where two are active at once.
-
-    The composite foreign key below is not hygiene, it is a security control: without
-    it a guessed identifier would be enough to spend another household's API credit.
-    """
-
-    __tablename__ = "llm_purpose_binding"
-
-    household_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("household.id", ondelete="CASCADE"), primary_key=True
-    )
-    purpose: Mapped[LlmPurpose] = mapped_column(
-        pg_enum(LlmPurpose, "llm_purpose"), primary_key=True
-    )
-    llm_provider_config_id: Mapped[uuid.UUID]
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["household_id", "llm_provider_config_id"],
-            ["llm_provider_config.household_id", "llm_provider_config.id"],
-            ondelete="CASCADE",
         ),
     )
 
@@ -2575,4 +2722,119 @@ class RateLimitBucket(Base):
                 "rollback cannot erase an attempt that was made."
             )
         },
+    )
+
+
+class HouseholdInvitation(UuidPkMixin, HouseholdScopedMixin, Base):
+    """A single-use, expiring credential that lets a second person join a household.
+
+    Until this table existed a household was permanently one person: ``household_
+    member`` was written in exactly one place -- registration, as ``owner`` -- so
+    the ``member`` and ``viewer`` roles were unreachable and every constraint the
+    documentation describes "per member" was a constraint of one.
+
+    **This is a credential, and it is the strongest one the application hands
+    out.** A machine token carries scopes; this carries a *membership*, and a
+    membership sees the eaters' allergens and infant age bands -- health data
+    under GDPR article 9. So it is stored exactly as ``machine_token`` and
+    ``user_session`` are, and for the reasons argued there: ``token_hash`` is a
+    SHA-256 of a 256-bit value handed back once and never again, ``prefix`` and
+    ``last4`` are all that survives so a pending invitation can be told apart in a
+    list, and a dump of this table yields nothing redeemable.
+
+    **There is no outbound email in Chaudron**, so nothing here assumes one. The
+    owner hands the value over out of band -- read aloud, typed into a message,
+    shown as a QR code. That is why the row names no recipient address: an
+    invitation is bearer, and pretending otherwise by storing an address nobody
+    verifies would be a check that looks like a control and is not. Adding SMTP
+    later changes how the value is *delivered* and nothing about this table.
+
+    **Expiry is mandatory.** ``machine_token.expires_at`` is nullable because the
+    contract lets a household run an integration forever; an invitation that never
+    expires is a permanent way in, left in a chat log. There is no "no expiry"
+    here and the column is ``NOT NULL``.
+
+    **Single use is enforced by the row, not by the service.** ``redeemed_at`` is
+    set by a conditional ``UPDATE ... WHERE redeemed_at IS NULL`` that must return
+    a row before the membership is written, so two clients racing the same value
+    produce one membership and one refusal rather than two memberships.
+
+    **An invitation can never carry ``owner``.** ``ck_household_invitation_role_
+    not_owner`` refuses it in the database, whatever the service does. Handing
+    somebody ownership is a decision the inviter cannot undo -- two owners may each
+    remove the other -- and it should not be reachable by pasting a code into a
+    form. Promotion to owner is a separate gesture this table deliberately does not
+    provide.
+    """
+
+    __tablename__ = "household_invitation"
+
+    role: Mapped[MembershipRole] = mapped_column(
+        pg_enum(MembershipRole, "membership_role"),
+        comment=(
+            "The role the redeemer receives. Never 'owner': see the check "
+            "constraint, and revision 0022."
+        ),
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        comment=(
+            "SHA-256 of the presented value, lowercase hex. The plaintext is never "
+            "stored: a dump of this table yields no redeemable invitation."
+        ),
+    )
+    prefix: Mapped[str] = mapped_column(
+        String(16),
+        comment=(
+            "The fixed scheme marker the value carries, stored per row so a list "
+            "still renders correctly if the format ever changes."
+        ),
+    )
+    last4: Mapped[str] = mapped_column(
+        String(4),
+        comment="The last four characters, to tell two pending invitations apart.",
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user_account.id", ondelete="CASCADE"),
+        nullable=False,
+        comment=(
+            "The owner who issued it. CASCADE rather than SET NULL: an invitation "
+            "outliving the account that vouched for it is a credential nobody owns."
+        ),
+    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    #: Mandatory, unlike ``machine_token.expires_at``. An invitation with no
+    #: expiry is a permanent way into a household, sitting in a chat log.
+    expires_at: Mapped[datetime]
+    revoked_at: Mapped[datetime | None]
+    #: Set once, by the conditional UPDATE that makes redemption single-use.
+    redeemed_at: Mapped[datetime | None]
+    redeemed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("user_account.id", ondelete="SET NULL"),
+        comment=(
+            "Who used it. SET NULL here, unlike the issuer: the membership this "
+            "produced is the record that matters, and it is deleted by its own "
+            "cascade when the account goes."
+        ),
+    )
+
+    __table_args__ = (
+        # The database's answer, not the service's. An invitation is pasted into a
+        # form by somebody the household barely knows yet; ownership is not a thing
+        # a form should be able to grant.
+        CheckConstraint("role <> 'owner'", name="role_not_owner"),
+        # A redemption is a fact about a person: recording half of it would leave a
+        # spent invitation nobody can attribute.
+        CheckConstraint(
+            "(redeemed_at IS NULL) = (redeemed_by_user_id IS NULL)",
+            name="redemption_recorded_whole",
+        ),
+        # The lookup key of a redemption, and not tenant-scoped for the reason
+        # `machine_token` gives: the digest is what *decides* the household, so a
+        # composite (household_id, token_hash) index would have to be probed with
+        # the answer it is being asked for.
+        Index("uq_household_invitation_token_hash", "token_hash", unique=True),
+        # "The pending invitations of this household", which is the whole of
+        # `GET /v1/households/invitations`.
+        Index("ix_household_invitation_household_id", "household_id"),
     )

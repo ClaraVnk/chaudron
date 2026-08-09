@@ -186,6 +186,31 @@
   color: var(--text-muted);
 }
 
+/*
+ * Secondary lines under the meta row: the printed date a freeze has replaced,
+ * the keeping table's advice on freezing this family, and what a freeze did
+ * about the storage location. Quiet on purpose — none of them is the reason the
+ * row exists, and all three are worth reading before acting.
+ */
+.itemFootnote {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/*
+ * A refused freeze. Louder than a footnote and deliberately so: every one of the
+ * server's refusals is a food-safety sentence, and it answers the question the
+ * user is holding a freezer door open to ask.
+ */
+.itemFailure {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
 .itemActions {
   display: flex;
   flex-wrap: wrap;

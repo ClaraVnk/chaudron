@@ -1,0 +1,133 @@
+/*
+ * The provider configuration screen.
+ *
+ * Deliberately the same shapes as `features/household/Household.module.css`: this
+ * panel does the same job one table over — a third party's credential, stored with
+ * a recorded agreement that can be withdrawn — and two consent screens that look
+ * different are two screens a household reads with different care.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.heading {
+  font-size: 1rem;
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cardName {
+  font-size: 1rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cardLine {
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.cardLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.actions > * {
+  flex: 1 1 auto;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/*
+ * The consent block. Boxed and set apart on purpose: what leaves the instance, and
+ * to whom, has to be read *before* the checkbox rather than found afterwards —
+ * which is what art. 7(2) means by "clearly distinguishable from the other
+ * matters".
+ */
+.consentBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.consentList {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.consentList > li + li {
+  margin-top: var(--space-1);
+}
+
+.consentNote {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.consentDetails {
+  font-size: 0.85rem;
+}
+
+.consentDetails > summary {
+  cursor: pointer;
+  font-weight: 600;
+}

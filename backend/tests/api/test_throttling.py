@@ -126,6 +126,13 @@ def tight_throttles(
         login_attempts_by_account=rate("login_attempts_by_account", logins, 3600.0),
         registrations=rate("registrations", logins, 3600.0),
         machine_token_attempts=rate("machine_token_attempts", logins, 3600.0),
+        # Slack for the same reason as the four above: these guard the recovery
+        # path, which these tests do not exercise, and a refusal here would fail
+        # them for the wrong reason. `tests/api/test_password_reset.py` is where
+        # the reset flow is driven.
+        password_reset_requests=rate("password_reset_requests", logins, 3600.0),
+        password_reset_attempts=rate("password_reset_attempts", logins, 3600.0),
+        account_emails=rate("account_emails", logins, 3600.0),
     )
 
 

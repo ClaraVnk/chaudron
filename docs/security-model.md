@@ -258,7 +258,7 @@ once decrypted in memory, goes nowhere.
 | Rotation of A2 | Inability to decrypt, or a prolonged exposure window | `api_key_encryption_key_id` allows reading the old and writing the new, hence a background migration with no downtime | **The procedure does not exist**: no trigger, no frequency, no re-encryption task, no behaviour if the old key has disappeared from the environment (data-model §11 q15). A mechanism without a procedure will never be run. |
 | Rotation of an A1 key by the user | The old key still valid at the provider | Idempotent write, the old value is overwritten | Chaudron cannot revoke a key at Anthropic. The interface **must** say "also revoke the old key in your console", otherwise the rotation is cosmetic. |
 | Instance operator (P3) | Theft of every A1 on the instance | **None, and this is irreducible** | Not covered by construction. Handled through transparency: the warning at entry time (§3, P3), and the recommendation of a dedicated key with a spending cap on the provider side. |
-| Theft of A1 through write access to the database | Reassigning another household's key to oneself | AAD bound to the row: a copied ciphertext does not decrypt. Composite FK on `llm_purpose_binding`: assigning another household's configuration is **impossible at the database level** | `instance_owner` mode is locked by a **cross-table** rule, hence not expressible as a `CHECK`; it rests on the service alone. |
+| Theft of A1 through write access to the database | Reassigning another household's key to oneself | AAD bound to the row: a copied ciphertext does not decrypt. There is no assignment row to repoint since revision `0025` removed `llm_purpose_binding`; a configuration is reached by `household_id` under RLS, never by an identifier alone | `instance_owner` mode is locked by a **cross-table** rule, hence not expressible as a `CHECK`; it rests on the service alone. |
 
 **Consequence for v1:** the leak through the error channel is the most credible
 flaw on this surface, because it assumes no attacker at all — just a talkative
@@ -310,7 +310,7 @@ The planned setup has **three layers**, and they are not equally solid.
 | Layer | What it really prevents | What it does not prevent |
 |---|---|---|
 | **Application convention** (`HouseholdScope`, base repository, `household_id` as a mandatory typed parameter) | Careless mistakes on the nominal path; `mypy` catches a forgotten parameter | **Nothing** as soon as somebody writes `session.execute(select(Model))` without going through the repository. ADR-0006 acknowledges this explicitly. A mandatory parameter guarantees that a `household_id` is *passed*, not that it is used in the `WHERE`. |
-| **Composite FKs** `(household_id, x_id)` → `parent(household_id, id)` | **Every** cross-household write: putting a lot into another household's fridge is impossible, even with a bug, even with a manual `UPDATE`. On `llm_purpose_binding`, this is what prevents spending another household's key | **Every read.** A composite FK filters nothing: a `SELECT` without `WHERE household_id` returns everybody's rows. And the leak that matters here is a read leak. |
+| **Composite FKs** `(household_id, x_id)` → `parent(household_id, id)` | **Every** cross-household write: putting a lot into another household's fridge is impossible, even with a bug, even with a manual `UPDATE`. Until revision `0025` this is what prevented spending another household's API key, through the composite FK on `llm_purpose_binding` | **Every read.** A composite FK filters nothing: a `SELECT` without `WHERE household_id` returns everybody's rows. And the leak that matters here is a read leak. |
 | **PostgreSQL RLS** | Everything, on read as on write, whatever the calling code | **Not enabled in v1** in the current design. |
 
 **What the current design leaves uncovered:**
@@ -482,11 +482,11 @@ describes the constraints the decision will have to respect.
 | **JWT algorithm confusion** | Token forgery | — | `CHAUDRON_JWT_ALGORITHM` is **an environment variable**. Making the algorithm configurable opens up `none` and HMAC/RSA confusion. The algorithm must be a code constant, and verification must enforce a list of accepted algorithms. |
 | Secret reuse | One leak compromises two functions | — | `CHAUDRON_SECRET_KEY` serves both sessions and JWTs. Two uses, two keys, derived if need be. |
 | **Brute force / credential stuffing** | Account takeover | — | **Not handled anywhere.** No rate limiting is designed: not on login, not on the webhook, not on receipt upload, not on recipe generation (which costs money). On a self-hosted instance with no WAF, this is P2's default attack. |
-| Account enumeration | Mapping of the users | — | Not handled. Identical responses and delays for a known and an unknown email, at login as at reset. |
+| Account enumeration | Mapping of the users | **Closed at every entrance.** Sign-in answers one body and burns one Argon2 verification whether or not the address exists (`services/auth.py`). `POST /v1/auth/register` answers `202` with a constant body for an address that already has an account as for one that does not — and therefore no longer issues a session, since it could only have issued one on one of the two branches. `POST /v1/auth/password/reset-request` answers a constant `202` likewise. The difference travels to the mailbox, which is the only party entitled to it (`services/account_email.py`). | Pentest finding O-10f, and it was blocked on SMTP rather than overlooked: closing it *requires* a channel only the address's owner can read. Residual, and written down rather than claimed away: the free branch of registration writes four rows and the taken branch one, which is tens of microseconds inside a request that already spent tens of milliseconds in Argon2, and `CHAUDRON_ACCOUNT_EMAILS_PER_ADDRESS_PER_HOUR` caps a caller at three samples an hour per address. |
 | Password hashing | Offline cracking after a database theft | `password_hash` is `text`, nullable | The algorithm is **not decided** and no dependency is present. It must be **Argon2id**, parameterised, with re-hashing at login when the parameters change. |
 | **Overly permissive CORS** | Cross-origin data theft | `CHAUDRON_CORS_ORIGINS` as an explicit list | `CHAUDRON_CORS_ALLOW_CREDENTIALS` exists with no documented guard rail. The pairing of `*` + `credentials: true` must **prevent startup**, not produce a warning. No origin must be reflected from the `Origin` header. |
-| Roles | A `viewer` writes | `membership_role` **enforced**: `require_member` on every state-changing route, `require_owner` on the four that hand out or accept a credential (`api/deps.py`). A machine token carries its issuer's *current* role, re-read on every request (migration `0014`), so minting one does not walk around the check. The matrix is `ROLE_GUARDED` in `tests/api/test_route_authentication.py`, asserted in both directions. | The role was decorative until this: one line of `src/` read it, on one route out of sixty-seven, and a `viewer` could register a third-party export token and consent on the household's behalf — replayed end to end. Still open, and deliberately not decided in code: whether erasing a person (`DELETE /v1/members/{id}`) and spending the household's inference budget (`POST /v1/recipes/suggest`) should be owner-only. Both are product calls, and `UNGUARDED_WRITES` names the second one. |
-| Session theft, once suspected | The victim has no remedy | `POST /v1/auth/sessions/revoke-all` and `POST /v1/auth/password`, both behind cookie + CSRF, both revoking **every** session including the caller's and rotating it (`api/routers/auth.py`) | Until these existed the only bound on a stolen cookie was the 30-day absolute expiry, and the only cure an operator with a psql prompt: `revoke_all` had been written and was called by nothing. There is still **no password reset**, because there is no SMTP — a forgotten password remains a forgotten account, and the change endpoint therefore requires the current one. |
+| Roles | A `viewer` writes | `membership_role` **enforced**: `require_member` on every state-changing route, `require_owner` on the four that hand out or accept a credential (`api/deps.py`). A machine token carries its issuer's *current* role, re-read on every request (migration `0014`), so minting one does not walk around the check. The matrix is `ROLE_GUARDED` in `tests/api/test_route_authentication.py`, asserted in both directions. | The role was decorative until this: one line of `src/` read it, on one route out of sixty-seven, and a `viewer` could register a third-party export token and consent on the household's behalf — replayed end to end. **Both open questions have since been answered, and `UNGUARDED_WRITES` is now empty.** `POST /v1/recipes/suggest` takes `MemberDep`: it writes a `RecipeSuggestion` on every call, spends money, and ships the infant-texture signal to a third party, so the census entry exempting it as "a POST that writes nothing" was disabled by a claim the code contradicted. The guard is also declared *before* the throttle, because FastAPI solves decorator dependencies front to back and a refused `viewer` was otherwise charged to the household's suggestion budget first. Removal is `DELETE /v1/households/members/{user_id}`: the owner removes anyone, anyone removes themselves, and a removal that would leave the household with no owner is refused rather than answered. **And the roles stopped being latent** the day invitations landed — until then no route minted anything but an `owner`, which is why this row's findings were rated as reachable-in-principle. |
+| Session theft, once suspected | The victim has no remedy | `POST /v1/auth/sessions/revoke-all` and `POST /v1/auth/password`, both behind cookie + CSRF, both revoking **every** session including the caller's and rotating it (`api/routers/auth.py`) | Until these existed the only bound on a stolen cookie was the 30-day absolute expiry, and the only cure an operator with a psql prompt: `revoke_all` had been written and was called by nothing. **Password reset now exists**, when an operator configures SMTP (`CHAUDRON_SMTP_HOST`): a single-use token, an hour long, stored as a SHA-256 digest exactly like a session (migration `0023`), invalidated by use, by a later request and by any password change — and a completed reset revokes **every** session of the account in the same transaction. The change endpoint still requires the current password, and the two are not alternatives: it is reached from a live session, which proves nothing about who holds it. |
 
 ---
 
@@ -722,32 +722,61 @@ provider configuration all leave the household in existence.
 
 For honesty's sake, and so that the next review knows where to pick up:
 
-- **No outbound mail, hence no account recovery.** The instance has no SMTP
-  configuration — there is none anywhere in the repository. Three things follow
-  from this, and they are accepted rather than worked around:
+- **Outbound mail exists now, and is optional.** This section used to open with
+  *"no outbound mail, hence no account recovery"* and list three consequences.
+  Two of the three are closed; the third is not, and is restated below rather
+  than dropped.
 
-  1. **No address verification.** An account can be created with somebody else's
-     address. The real impact is low as long as the only thing an address opens
-     is a household created by the same gesture, but it will grow the day email
-     invitations exist.
-  2. **No password reset, and this is deliberate.** A recovery path that does not
-     verify the address is an unauthenticated backdoor: whoever knows the address
-     takes the account. A lost password is therefore a lost account, and the login
-     screen says so. The path that works is a human one: an `owner` of the
-     household re-invites the person.
-  3. **Sign-up is an enumeration oracle.** `409 email-already-registered`
-     confirms that an address has an account. Closing it would require responding
-     identically in both cases *and* sending a message to the address — that is,
-     exactly what cannot be done here.
+  The list of preconditions this section carried has been implemented in its own
+  order: an SMTP configuration **validated at startup** (`config.py`, three model
+  validators — a relay without a sender address, credentials on an unencrypted
+  socket to anything but the loopback, and a production instance whose reset
+  links would be plain HTTP, are each refused before the process serves);
+  single-use short-lived tokens **stored hashed** exactly like sessions
+  (`password_reset_token.token_hash`, migration `0023`); rate limiting per
+  address *and* per source on the request as well as on the consumption
+  (`api/throttling.py`); and invalidation of **all** the user's sessions on a
+  completed reset, in the same transaction as the password change.
 
-  What it would take to lift all three, in order: an SMTP configuration
-  **validated at startup** (fail-fast, like the rest of `config.py` — a send that
-  fails silently turns "I did not receive the message" into an unsolvable
-  incident), single-use short-lived tokens **stored hashed** exactly like sessions
-  (`user_session.token_hash`), rate limiting per address *and* per IP on the
-  request as well as on the consumption, and invalidation of **all** the user's
-  sessions on password change (`AuthService.revoke_all` already exists for this).
-  Until that is done, building nothing is better than half a path.
+  1. **Address verification is still absent.** An account can still be created
+     with somebody else's address. What changed is that the address now *hears
+     about it*: registration sends either "your account is ready" or "somebody
+     tried to register your address; you already have one". Nothing refuses a
+     sign-in until the address is confirmed, so this remains open — and it will
+     matter more the day email invitations exist.
+  2. **Password reset exists, when SMTP is configured.** It is deliberately not
+     mandatory: many self-hosted installs have no relay. An instance without one
+     **says so** — `GET /v1/auth/capabilities` answers `{"password_reset":
+     false}`, the sign-in screen renders no link, and the reset endpoints answer
+     `503`. Accepting a request and dropping it silently was rejected as the one
+     behaviour worse than not having the feature.
+  3. **Sign-up is no longer an enumeration oracle.** `409
+     email-already-registered` is gone, helper included, and the endpoint answers
+     `202` in both cases. The cost is that registration no longer signs the
+     caller in, which is not a separate decision: a session can only be minted on
+     the branch where the address was free.
+
+  **Three things about the reset flow are load-bearing and are named here so the
+  next review checks them rather than rediscovers them.**
+
+  *The mail is never sent from the request handler.* Both routes hand the message
+  to a Starlette background task and the response leaves first. An SMTP dial-out
+  inside the handler would take a second or two on the branch that has something
+  to send and nothing on the branch that does not — the oracle again, measured
+  with a stopwatch instead of read from a body.
+
+  *The reset token is hexadecimal, and that is a logging decision.*
+  `secrets.token_hex(32)` is 64 unbroken alphanumeric characters, which is
+  exactly the shape `infra/redaction.py` blanks on length alone. Nothing logs it;
+  making it *redactable* is the second lock, for the line somebody adds in a
+  hurry. `secrets.token_urlsafe` would have emitted `-` and `_`, each of which
+  breaks that run, and would have survived a log line intact.
+
+  *One limiter here protects a third party rather than this instance.*
+  `CHAUDRON_ACCOUNT_EMAILS_PER_ADDRESS_PER_HOUR` is keyed on the **recipient**
+  and charged whether or not the address has an account. Without it the reset
+  form is a mail bomb aimed at any address an attacker knows, sent from a relay
+  the victim trusts, and it is this instance's reputation that pays.
 
 - **The "browser" Ollama topology** (case B) is out of scope for v1. It will
   reopen the whole of §6.2 from a different angle: the prompt becomes public, and
