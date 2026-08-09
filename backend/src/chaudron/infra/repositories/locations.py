@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chaudron.domain.models import InventoryLot, StorageLocation
+from chaudron.domain.models import InventoryLot, StorageKind, StorageLocation
 from chaudron.domain.ports import LocationDraft, LocationNameTakenError, LocationSummary
 
 
@@ -85,6 +85,37 @@ class SqlLocationRepository:
             raise LocationNameTakenError(draft.name) from exc
 
         return LocationSummary(id=location.id, name=location.name, kind=location.kind, item_count=0)
+
+    async def sole_of_kind(
+        self, household_id: uuid.UUID, kind: StorageKind
+    ) -> LocationSummary | None:
+        """The household's only active location of that kind, or ``None`` for none *or several*.
+
+        ``LIMIT 2`` rather than ``LIMIT 1``: the caller has to be able to tell one
+        freezer from two, and the second row is what says so. Fetching all of them
+        to count would read a list whose length is the only thing anyone wants.
+
+        ``item_count`` is reported as zero rather than counted. The one caller --
+        freezing a lot -- is about to change that count anyway, and it names the
+        location rather than displaying it; the correlated subquery in
+        :meth:`list_with_counts` exists for the screen that shows the number.
+        """
+        rows = (
+            await self._session.execute(
+                select(StorageLocation.id, StorageLocation.name, StorageLocation.kind)
+                .where(
+                    StorageLocation.household_id == household_id,
+                    StorageLocation.kind == kind,
+                    StorageLocation.archived_at.is_(None),
+                )
+                .order_by(StorageLocation.sort_order, StorageLocation.name)
+                .limit(2)
+            )
+        ).all()
+        if len(rows) != 1:
+            return None
+        row = rows[0]
+        return LocationSummary(id=row.id, name=row.name, kind=row.kind, item_count=0)
 
     async def exists(self, household_id: uuid.UUID, location_id: uuid.UUID) -> bool:
         found = await self._session.scalar(

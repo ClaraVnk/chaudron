@@ -67,10 +67,11 @@ __all__ = [
 
 #: Stored alongside every generated suggestion. Without it, "the suggestions got
 #: worse last week" is unanswerable. Bumped when the wording changes: ``recipes-2``
-#: is the first version whose untrusted half is a delimited JSON document, and
+#: is the first version whose untrusted half is a delimited JSON document,
 #: ``recipes-3`` the first that carries the computed weekly shortfall and the
-#: closed staple list of ADR-0009.
-PROMPT_VERSION: Final = "recipes-3"
+#: closed staple list of ADR-0009, and ``recipes-4`` the first that marks the
+#: household's frozen stock and states what thawing costs.
+PROMPT_VERSION: Final = "recipes-4"
 
 #: The marker lines the untrusted JSON document sits between. Safe as delimiters
 #: only because every value inside is sanitised to a single line first: a value
@@ -107,6 +108,12 @@ RECIPE_SYSTEM_PROMPT: Final = (
     "- Name each ingredient the way the inventory names it. A suggestion whose "
     "ingredients this application cannot match back to the inventory is discarded "
     "whole, so a paraphrase costs the household the recipe.\n"
+    "- An inventory item marked `frozen` is in the household's freezer. It is real "
+    "stock and you may build a recipe on it, but it cannot be cooked tonight: the "
+    "first step must be to thaw it, in the refrigerator, and the duration you give "
+    "must either include that wait or say that it excludes it. Once thawed it keeps "
+    "three days refrigerated and is never refrozen, so do not plan to put a "
+    "leftover portion back in the freezer.\n"
     "- Steps are short, imperative and ordered.\n"
     "- Declare `preparation`: how the dish is served, whether it needs cooking, "
     "and whether it needs an oven. Say what is true of your recipe, not what was "
@@ -235,6 +242,11 @@ def _item_object(item: InventoryItem) -> dict[str, object]:
         entry["unit"] = unit
     if item.expires_in_days is not None:
         entry["expires_in_days"] = item.expires_in_days
+    if item.frozen:
+        # Present only when true, so the document does not grow a ``false`` on
+        # every line of a three-hundred-item inventory for the sake of symmetry.
+        # A server-computed boolean, so it needs no sanitising.
+        entry["frozen"] = True
     return entry
 
 

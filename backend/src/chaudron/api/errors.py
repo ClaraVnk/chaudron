@@ -30,6 +30,10 @@ from chaudron.domain.ports import (
     InventoryItemNotFoundError,
     LocationNameTakenError,
     LocationNotFoundError,
+    LotAlreadyExpiredError,
+    LotAlreadyFrozenError,
+    LotAlreadyThawedError,
+    LotNotFrozenError,
     MemberNotFoundError,
     MemberNotInHouseholdError,
     NoSuggestionWithinConstraintsError,
@@ -325,14 +329,13 @@ def csrf_token_invalid() -> ProblemError:
     )
 
 
-def email_already_registered() -> ProblemError:
-    """``409`` on registration. Knowingly an oracle; see ``services/auth.py``."""
-    return ProblemError(
-        slug="email-already-registered",
-        title="Email already registered",
-        status=409,
-        detail="An account already exists for this email address.",
-    )
+# ``email_already_registered`` used to live here, answering ``409`` on
+# registration. It is gone rather than deprecated, and the deletion is the fix:
+# the response was the enumeration oracle (pentest finding O-10f), so a helper
+# that still built it would be a loaded gun for whoever next writes a route that
+# needs to know an address is taken. ``POST /v1/auth/register`` now answers
+# ``202`` either way and the disclosure travels by mail
+# (``api/routers/auth.py``, ``services/account_email.py``).
 
 
 def problem_for_body_too_large(limit_bytes: int) -> ProblemError:
@@ -471,6 +474,49 @@ def problem_for(error: DomainError) -> ProblemError:
                 title="Concurrent inventory change",
                 status=409,
                 detail="Another change to the same lot won the race. Retry the request.",
+            )
+        # -- Home freezing -------------------------------------------------- #
+        #
+        # All four are 409: the request is well formed and the lot exists, and
+        # what refuses it is the state that lot is in. Each detail says the rule
+        # rather than naming the column, because the client shows this sentence
+        # to somebody standing in front of an open freezer.
+        case LotAlreadyThawedError():
+            return ProblemError(
+                slug="lot-already-thawed",
+                title="Thawed food is not refrozen",
+                status=409,
+                detail=(
+                    "This lot has already been thawed. Thawed food must not go back into "
+                    "the freezer; eat it within three days of thawing, refrigerated."
+                ),
+            )
+        case LotAlreadyFrozenError():
+            return ProblemError(
+                slug="lot-already-frozen",
+                title="Already in the freezer",
+                status=409,
+                detail=(
+                    "This lot is already frozen. Freezing it again would restart its "
+                    "keeping time from today, which the freezer does not do."
+                ),
+            )
+        case LotAlreadyExpiredError():
+            return ProblemError(
+                slug="lot-already-expired",
+                title="Too late to freeze",
+                status=409,
+                detail=(
+                    "This lot is already past its date. Freezing halts spoilage, it does "
+                    "not reverse it, and the food does not become fit again in the freezer."
+                ),
+            )
+        case LotNotFrozenError():
+            return ProblemError(
+                slug="lot-not-frozen",
+                title="Nothing to thaw",
+                status=409,
+                detail="This lot is not frozen, so there is nothing to take out of the freezer.",
             )
         # -- Dietary constraints (contract v1.1) ---------------------------- #
         #

@@ -47,8 +47,7 @@ erDiagram
     household ||--o{ receipt : "owns"
     household ||--o{ recipe_suggestion : "owns"
     household ||--o{ product : "may privatise"
-    household ||--o{ llm_provider_config : "configures"
-    household ||--o{ llm_purpose_binding : "assigns"
+    household ||--o| llm_provider_config : "configures (at most one live)"
     household ||--o{ household_person : "feeds"
     household ||--o{ budget_target : "sets for itself"
     household ||--o{ declined_repurchase : "declines"
@@ -63,7 +62,6 @@ erDiagram
     product ||--o{ declined_repurchase : "targeted by"
 
     llm_provider ||--o{ llm_provider_config : "typed by"
-    llm_provider_config ||--o{ llm_purpose_binding : "assigned to a purpose"
     llm_provider_config ||--o{ recipe_suggestion : "produced"
     llm_provider_config ||--o{ receipt : "parsed"
 
@@ -409,6 +407,8 @@ not before.
 | `best_before` | `date` NULL | |
 | `date_kind` | `expiry_date_kind` NOT NULL | `use_by` \| `best_before` \| `unknown` |
 | `opened_at` | `date` NULL | |
+| `frozen_at` | `date` NULL | when **this household** froze it; voids `best_before`, §7.5 |
+| `thawed_at` | `date` NULL | read *before* `frozen_at` by the expiry rule, §7.4 |
 | `acquired_on` | `date` NULL | |
 | `unit_price` | `numeric(12,2)` NULL | price paid, frozen |
 | `currency` | `char(3)` NULL | |
@@ -432,6 +432,10 @@ not before.
 - `ck_inventory_lot_price_pair`: `(unit_price IS NULL) = (currency IS NULL)`.
 - `ck_inventory_lot_date_kind`: `date_kind <> 'unknown' OR best_before IS NULL`
   — you do not qualify a date you do not have, and vice versa.
+- `ck_inventory_lot_thaw_follows_freeze`:
+  `frozen_at IS NULL OR thawed_at IS NULL OR thawed_at >= frozen_at` — not “thawed
+  implies frozen”, because a product sold frozen is thawed by a household that
+  never froze it. What cannot happen either way is coming out before going in.
 
 **Indexes**
 
@@ -454,6 +458,11 @@ not before.
   recipe generation and shopping-list resolution.
 - `ix_inventory_lot_source_receipt_line` (`source_receipt_line_id`) → undoing a
   receipt import (“delete this receipt and everything it created”).
+- `ix_inventory_lot_frozen` (`household_id, frozen_at` WHERE
+  `frozen_at IS NOT NULL AND thawed_at IS NULL`) → “what is in the freezer”, which
+  is both a screen of its own and the set the expiry rule treats differently. The
+  partial is on the *currently* frozen: a thawed lot is back on the ordinary clock
+  and belongs to the listings that already have their own index.
 
 ---
 
@@ -846,9 +855,10 @@ shared by the application.
 
 **Constraints**
 
-- `uq_llm_provider_config_household_id`: unique `(household_id, id)` — target of
-  `llm_purpose_binding`'s composite FK, which makes it impossible to assign
-  another household's key (§9.4).
+- `uq_llm_provider_config_household_id`: unique `(household_id, id)` — the anchor
+  a composite `(household_id, x_id)` foreign key needs. Its only user was
+  `llm_purpose_binding`, dropped by revision `0025`; the constraint is kept because
+  it is the shape every household-scoped parent in this schema publishes (§9.4).
 - `uq_llm_provider_config_label`: unique `(household_id, lower(label))` WHERE
   `archived_at IS NULL`.
 - `ck_llm_provider_config_secret_triplet`: the three secret columns
@@ -884,11 +894,36 @@ Chapter V transfer. Enforced in `services/providers.py`, on every load, before t
 credential is decrypted — so a withdrawal takes effect at the next request rather
 than at the next restart.
 
+**One household, one configuration.** Revision `0025` made this a schema rule:
+`uq_llm_provider_config_household_active` is **unique** on `household_id` where
+`archived_at IS NULL`. Unique, and not merely indexed, because "which provider does
+this household use?" must have exactly one answer at the moment it is asked — the
+alternative is a resolution step that picks between candidates, and picking wrongly
+spends a household's money on a provider it did not choose for that call. The rule
+is enforced by the database rather than by the service so that two owners pressing
+*create* at the same instant produce one configuration and one `409`, not two rows.
+
+The predicate is what keeps it liveable. Archived rows are excluded, so a household
+retires the configuration it has and registers a different one whenever it likes;
+what it cannot have is two usable at the same moment. `POST /v1/providers` refuses
+the second with a `409` and names both remedies — archive the existing one, or edit
+it in place — rather than replacing it, because the row it would overwrite carries a
+working API key and retiring that is the household's decision to take.
+
+**What this costs a household, plainly.** Two configurations made one arrangement
+possible that one does not: a local, vision-less Ollama for recipes *and* a hosted
+multimodal provider for photographed receipts. That arrangement is gone; a household
+that wants both must pick one. Nothing fails silently as a result — a model without
+vision is refused at `ProviderService.for_receipts` through ADR-0005's `unavailable`
+case, with the reason and the remedy on the banner the household already sees, and a
+PDF order recap is read with no model at all (§9.1). It is one fewer arrangement
+available, not a broken feature, and it is the price of the single answer above.
+
 **Indexes**
 
-- `ix_llm_provider_config_household_active` (`household_id` WHERE
-  `archived_at IS NULL`) → the household's configuration screen, the only routine
-  read.
+- `uq_llm_provider_config_household_active`: **unique** `(household_id)` WHERE
+  `archived_at IS NULL` → see *One household, one configuration* below. It also
+  serves the configuration screen, which reads exactly this predicate.
 - `ix_llm_provider_config_invalid` (`household_id` WHERE
   `status = 'invalid_credentials'`) → the “your key no longer works” banner,
   shown on every page; must be answered at no cost.
@@ -900,29 +935,16 @@ than at the next restart.
 
 ---
 
-### 4.14 `llm_purpose_binding`
+### 4.14 `llm_purpose_binding` — removed by revision `0025`
 
-**Why it exists** — to say which configuration serves which **purpose**:
-generating a recipe, or reading a receipt.
+The table that said which configuration served which purpose: generating a recipe,
+or reading a receipt. Its whole job was to choose between *several* configurations,
+and since revision `0025` a household has one or none — so no meaningful row could
+exist in it. Dropped rather than kept empty; §4.13 carries the rule that replaced
+it, and the consequence for a household that wanted two.
 
-| Column | Type | Notes |
-|---|---|---|
-| `household_id` | `uuid` PK, FK → `household(id)` ON DELETE CASCADE | |
-| `purpose` | `llm_purpose` PK | `recipe_generation` \| `receipt_parsing` |
-| `llm_provider_config_id` | `uuid` NOT NULL | composite FK |
-| `updated_at` | `timestamptz` NOT NULL | |
-
-**Constraints** — composite FK `(household_id, llm_provider_config_id)` →
-`llm_provider_config(household_id, id)` ON DELETE CASCADE. Here the composite is
-not hygiene: it is a **security control**. Without it, a guessed identifier would
-be enough to spend another household's API key.
-
-The composite primary key `(household_id, purpose)` guarantees **at most one
-active configuration per purpose** — with no “active” row to unmark, hence no
-window in which two configurations would both be active.
-
-**Indexes** — the PK covers the only hot query (“which config for this purpose in
-this household?”), run before every model call.
+The number is left in place rather than reclaimed, so that every §4.x reference
+written before this revision still points at what it named.
 
 ---
 
@@ -1633,13 +1655,14 @@ On **every** business table, including those where it could be derived by a join
 3. **Audit readability.** `SELECT count(*) … GROUP BY household_id` must work
    table by table, without rebuilding the ownership tree.
 
-**Eighteen tables out of twenty-seven carry `household_id`**: `budget_target`,
+**Seventeen tables carry `household_id`**: `budget_target`,
 `declined_repurchase`, `household_member`, `household_person`, `inventory_lot`,
-`llm_provider_config`, `llm_purpose_binding`, `machine_token`, `product`
+`llm_provider_config`, `machine_token`, `product`
 (nullable — public or private), `receipt`, `receipt_line`, `recipe_suggestion`,
 `recipe_suggestion_ingredient`, `shopping_export_target`, `shopping_list`,
-`shopping_list_item`, `stock_movement`, `storage_location`. All eighteen are
-covered by RLS (§5.3).
+`shopping_list_item`, `stock_movement`, `storage_location`. All seventeen are
+covered by RLS (§5.3). `llm_purpose_binding` was the eighteenth until revision
+`0025` dropped it.
 
 `machine_token` belongs on that list and is easy to misfile, because a token
 looks like a property of the account that created it. It is not: `household_id`
@@ -1769,8 +1792,9 @@ PostgreSQL that does not hand it out.
   and served through a signed URL. A `receipt` correctly filtered in the database
   protects nothing if the bucket is enumerable.
 - A plain FK where a composite one was possible: a guessed identifier is enough
-  to write into another household's data. On `llm_purpose_binding`, that would be
-  outright theft of a paid API key (§4.14).
+  to write into another household's data. On the table that once pointed at a
+  provider configuration, that would have been outright theft of a paid API key —
+  which is why that reference was composite for as long as it existed (§4.14).
 - `llm_provider_config` read without a filter: `api_key_last4` on its own does not
   compromise a key, but the whole set (provider, model, base URL of a home
   Ollama) maps out a third party's private infrastructure.
@@ -1898,44 +1922,111 @@ the freshness is not.
 pasta, or a guilty silence about minced meat. The tone of the notifications
 depends directly on it.
 
-`opened_at` captures the “eat it soon after opening” rule, which can shorten the
-effective date. The effective date is **computed**, not stored:
+`opened_at` captures the “eat it soon after opening” rule, and `frozen_at` /
+`thawed_at` capture what a household's own freezer does to the same lot. The
+effective date is **computed**, not stored, and it has three branches rather than
+one formula:
 
 ```
-min(best_before, opened_at + shelf_life_guideline.opened_days)
+thawed_at IS NOT NULL  ->  thawed_at + 3 days                      (ANSES)
+frozen_at IS NOT NULL  ->  frozen_at + shelf_life_guideline.home_frozen_days
+otherwise              ->  min(best_before, opened_at + shelf_life_guideline.opened_days)
 ```
+
+**The order of the branches is the safety property**, and it is the first thing to
+preserve in any rewrite. A lot that was frozen and then thawed carries *both*
+timestamps; reading the frozen branch first would answer “three months” about meat
+that came out of the freezer on Tuesday. `domain/shelf_life.py` implements the rule
+twice — once in Python for callers holding the values, once in SQL for the queries
+that sort and filter on it — and `tests/domain/test_effective_expiry.py` drives the
+same table through both rather than trusting that two copies agree.
 
 The guideline row is reached through `product.food_family` — a coarse family
-resolved at ingestion, and deliberately **not** a foreign key (§4.17). The clamp
-only ever shortens. Opening voids the printed date rather than extending it:
-ANSES is explicit that an opened product does not keep its original use-by, and a
-formula that could push a date outwards would be a food-safety bug, not a
-rounding difference.
+resolved at ingestion, and deliberately **not** a foreign key (§4.17).
 
-Two cases yield no clamp at all, and both are ordinary rather than exceptional:
-`product.food_family` is `NULL` — the upstream taxonomy did not resolve, so we
-suggest nothing rather than invent — or the family's `opened_days` is `NULL`,
-meaning opening changes nothing for that family. The three days everyone quotes
-is one family's value (fresh dairy), not the rule; across families `opened_days`
-ranges from one day to six months.
+Outside the freezer the clamp only ever shortens. Opening voids the printed date
+rather than extending it: ANSES is explicit that an opened product does not keep
+its original use-by, and a formula that could push a date outwards would be a
+food-safety bug, not a rounding difference. `LEAST` cannot extend anything, which
+is why the third branch keeps it. Freezing is the one thing that does not fit that
+shape — it stops one clock and starts another — which is why the rule is a `CASE`
+and no longer a single minimum.
+
+Several cases yield no date at all, and all of them are ordinary rather than
+exceptional: `product.food_family` is `NULL` — the upstream taxonomy did not
+resolve, so we suggest nothing rather than invent — or the family's `opened_days`
+is `NULL`, meaning opening changes nothing for that family, or its
+`home_frozen_days` is `NULL`, meaning **this application proposes no date for a
+frozen lot of that family**. That last one is never “keeps indefinitely”; §7.5 says
+what it is instead. The three days everyone quotes is one family's value (fresh
+dairy), not the rule; across families `opened_days` ranges from one day to six
+months.
 
 We do not store the result: it is a derived value that opening a jar is enough to
-invalidate.
+invalidate. It is computed **in SQL**, because the listing sorts by it, the
+`expiring_within_days` filter compares against it and the calendar feed windows on
+it — all three over a household's whole active inventory, which is exactly the
+query shape that must not load every lot to discard most of them.
 
-> **Specified, not yet implemented.** `opened_at` is stored and carried through
-> the API, but nothing computes this minimum today — every expiry filter and every
-> calendar alarm reads the raw `best_before`, and `shelf_life_guideline` is seeded
-> and tested without any query reading it. The paragraph above is the contract for
-> whoever wires it up, and the *never an extension* clamp is the part of it that is
-> easy to get wrong.
+### 7.5 Freezing at home
 
-### 7.5 Freezing
+**Freezing is a state of the lot, not a change of product.** `product.food_family
+= 'frozen'` already exists and means something else entirely — *sold* frozen, a bag
+of peas or a tub of ice cream, carrying a printed date that applies as it stands.
+Reclassifying a home-frozen chicken breast into that family would hand it an
+industrial product's date and lose the fact that it was ever fresh. So the state
+lives on the lot, in two nullable dates beside `opened_at` whose mirror they are:
+one brings the date forward, the other replaces it.
 
-Moving a lot to a `storage_location` of kind `freezer` suspends the expiry date.
-The model allows it (the `kind` is known), the rule stays in the application. A
-case deliberately left untreated for now: the post-thaw use-by date, which would
-require keeping a history of location changes — `stock_movement.kind = 'transfer'`
-is provided for that but is not used yet.
+**Two columns, not one flag.** Thawing is not the absence of freezing. It starts
+the shortest clock in the application — three days, refrigerated — and it forbids
+going back into the freezer. A lot that was frozen and then thawed carries both
+dates, and `ck_inventory_lot_thaw_follows_freeze` enforces only the ordering
+(`thawed_at >= frozen_at`) rather than “thawed implies frozen”, because a product
+sold frozen is thawed by a household that never froze it.
+
+`shelf_life_guideline` carries the durations: `home_frozen_days` and a
+`freezing_note` per family. Three families have a figure (meat 90 days, fish 60,
+hard cheese 180 — the short end of each FoodKeeper split, for the same reason the
+unopened figures take it), and six have none. `NULL` there covers two different
+situations the note has to tell apart: **no honest figure exists** — a vegetable's
+answer depends on whether it was blanched, which nothing here knows — or **do not
+do this at all**, for eggs in shell and sealed tins, both of which burst.
+
+**What the application refuses, and what it merely warns about.** Three refusals,
+in `services/inventory.py`, and every one of them protects the *computed date*
+rather than the household's judgement:
+
+| Refused | Why |
+|---|---|
+| Freezing a lot past its effective date | Freezing halts spoilage, it does not reverse it — and since freezing voids the printed date, accepting would replace a use-by crossed last Thursday with ninety days |
+| Freezing a lot carrying `thawed_at` | ANSES: thawed food is not refrozen. The rule with the shortest fuse here, and the one tested first |
+| Freezing a lot already frozen | `effective_expiry` counts from `frozen_at`, so a second freeze would hand it another three months on the strength of a duplicate tap |
+
+A family with no `home_frozen_days` is **not** refused, including the two the table
+advises against freezing. The household is reporting a fact about its own freezer,
+not requesting permission, and a refusal does not keep the eggs out of it — it only
+keeps the application from knowing they are in it, which is the blindness the
+feature exists to end. Those families threaten no date, because there is none to
+compute; so the note is returned verbatim, on the operation *and* on every listing,
+and an adult decides. What must never happen is silent acceptance.
+
+Freezing also files the lot in the household's freezer, and thawing files it in the
+fridge — where the three days it now has are three days *refrigerated*. Neither
+move is a guess: with no location of that kind, or with two of them, nothing is
+moved and the answer says so. The move also gives way to
+`uq_inventory_lot_merge_key`, which covers the destination: if the freezer already
+holds an identical lot, the freeze still happens and the lot stays where it is.
+
+**No `stock_movement` row is written**, and `stock_movement.kind = 'transfer'`
+stays unused. That table is a quantity ledger — `inventory_lot.quantity_canonical`
+is documented as a cache of `SUM(delta_canonical)` (§4.8), and
+`ck_stock_movement_delta_nonzero` refuses a row that moves nothing. A freeze moves
+no quantity, so the only entry it could write is one the database rejects, and a
+`-x`/`+x` pair to get around that would fabricate two events that did not happen
+and double every figure computed from the table. The state keeps a better record of
+its own: `frozen_at` and `thawed_at` are dates, so the lot carries *when* as well
+as *what*.
 
 ---
 
@@ -1997,30 +2088,35 @@ small Ollama model with no vision cannot import a receipt. The data model has to
 make that knowable *before* the button is offered, not discoverable through a 500
 error.
 
-### 9.1 Cardinality: several configurations, one assignment per purpose
+### 9.1 Cardinality: one live configuration per household
 
-**Chosen approach**: several `llm_provider_config` rows per household, and an
-assignment table `llm_purpose_binding` that designates **one active configuration
-per purpose** (`recipe_generation`, `receipt_parsing`).
+**Chosen approach** since revision `0025`: **one** live `llm_provider_config` row
+per household, or none. Enforced by `uq_llm_provider_config_household_active`,
+unique on `household_id` where `archived_at IS NULL` (§4.13).
 
-Why not a single active configuration per household: the two purposes do not have
-the same needs. Reading a receipt requires **vision**; generating a recipe
-requires sound reasoning and **structured output**, but no image at all. The
-realistic use case is exactly that one: a household runs a free local Ollama for
-recipes (high volume, acceptable quality) and reserves its paid key for receipts
-(low volume, vision mandatory). A single provider per household forces you to pay
-for the more demanding of the two needs on both.
+The schema previously allowed several, with an assignment table
+(`llm_purpose_binding`) naming which one served recipe generation and which one
+served receipt parsing. The argument for it was real: reading a receipt requires
+**vision**, generating a recipe requires sound reasoning and **structured output**
+but no image at all, so a household could run a free local Ollama for recipes and
+reserve a paid multimodal key for receipts.
 
-Why a separate assignment table rather than a `purpose` column on the
-configuration: **an API key must exist in exactly one place**. With `purpose` on
-the configuration, a household that wants to use the same key for both purposes
-has to enter it twice — hence encrypt it twice, hence rotate it twice. The day it
-rotates only one of them, half the application drops into `invalid_credentials`
-for no visible reason. Separating credential from assignment removes that entire
-class of bug.
+**That arrangement is what the simplification costs, and it is a real cost.** A
+household that wants both must now pick one. What it gets in exchange is that
+"which provider does this household use?" has exactly one answer, given by a
+predicate instead of by a resolution step that arbitrates between candidates — and
+the two refusals that step needed ("several configurations, none assigned to
+recipes"; the same for receipts) are gone with it, along with the screen that would
+have had to explain them.
 
-Cost of this choice: one more table, and a join before every call — a join served
-by a primary key, hence free.
+Nothing fails silently on the path given up. A configured model without vision is
+refused at `ProviderService.for_receipts` through ADR-0005's `unavailable` case,
+with the reason and the remedy on the banner the household already sees, and a PDF
+order recap is read with no model at all.
+
+The "an API key must exist in exactly one place" argument that justified separating
+credential from assignment survives intact, and more cheaply: with one
+configuration there is one key, entered once, encrypted once, rotated once.
 
 ### 9.2 Key storage: encryption at rest
 
@@ -2119,10 +2215,8 @@ date:
 
 ```sql
 SELECT c.supports_vision AND c.status = 'verified'
-FROM llm_purpose_binding b
-JOIN llm_provider_config c
-  ON (c.household_id, c.id) = (b.household_id, b.llm_provider_config_id)
-WHERE b.household_id = :household_id AND b.purpose = 'receipt_parsing';
+FROM llm_provider_config c
+WHERE c.household_id = :household_id AND c.archived_at IS NULL;
 ```
 
 No row = the feature is not configured. `false` = the feature is unavailable with
@@ -2131,10 +2225,15 @@ interface — “configure your AI access” is not “your model cannot read im
 
 ### 9.4 Isolation and locking of `instance_owner` mode
 
-Isolation between households goes through `llm_purpose_binding`'s composite
-foreign key (§4.14): assigning another household's configuration is impossible
-**at the database level**. It is the only protection that holds, since an
-application bug here does not leak data but *spends a third party's money*.
+Isolation between households rests on `llm_provider_config.household_id` and the
+RLS policy over it (§5.3): a configuration is reached by household, never by an
+identifier alone. Until revision `0025` there was a second lock — the composite
+foreign key from `llm_purpose_binding` (§4.14), which made *assigning* another
+household's configuration impossible at the database level. Dropping the table
+dropped the row that could have carried the theft, so there is no longer an
+assignment to constrain; what remains is the tenant predicate, which is what
+answers a read. This matters because an application bug here does not leak data,
+it *spends a third party's money*.
 
 The `instance_owner` mode is reserved for the household flagged
 `household.is_instance_owner`, and `uq_household_instance_owner` guarantees there

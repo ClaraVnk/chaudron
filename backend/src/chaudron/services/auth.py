@@ -49,6 +49,7 @@ from chaudron.domain.models import (
     Household,
     HouseholdMember,
     MembershipRole,
+    PasswordResetToken,
     UserAccount,
     UserSession,
 )
@@ -99,10 +100,17 @@ class AuthError(Exception):
 class EmailAlreadyRegisteredError(AuthError):
     """The address already has an account.
 
-    Unavoidably an enumeration oracle on a registration form, and knowingly
-    accepted: closing it requires sending a message to the address instead of
-    answering the caller, and this instance has no outbound mail (see the module
-    note in ``api/routers/auth.py``).
+    **No longer reported to the caller**, and that is the whole of pentest finding
+    O-10f. It used to become a ``409``, which made the registration form an
+    account enumerator: anybody could ask whether an address had an account here
+    and be told. ``api/routers/auth.py`` now catches this and answers exactly what
+    it answers for an address that was free -- ``202`` -- while the difference
+    travels to the mailbox, which is the only party entitled to it
+    (``services/account_email.py``).
+
+    It stays an exception rather than becoming a return value because the caller
+    has to distinguish the two paths *internally*: one of them mints a reset link
+    for an account that already exists, the other does not.
     """
 
 
@@ -122,11 +130,23 @@ class InvalidCurrentPasswordError(AuthError):
     """The password offered as "the current one" is not it.
 
     Also raised for an account that has no password at all -- one created by an
-    owner rather than by registration. There is no path here that sets a first
-    password without knowing the previous one, because there is no outbound mail
-    to prove the person asking is the person named (see the module note in
-    ``api/routers/auth.py``), and "no password" must not become "any password
-    accepted".
+    owner rather than by registration. That account cannot set a first password
+    *here*, because this endpoint's whole authority is the secret the caller
+    already holds and there is none: it recovers through
+    :meth:`AuthService.issue_password_reset`, which proves control of the address
+    instead. "No password" must never become "any password accepted".
+    """
+
+
+class PasswordResetTokenInvalidError(AuthError):
+    """The reset token is unknown, expired, already used, or superseded.
+
+    **One exception for all four**, and the API turns it into one body. Telling a
+    caller that their link *existed* and has expired, as against never having
+    existed, confirms that a reset was requested for the address they hold -- which
+    is the enumeration answer the whole flow is arranged to withhold. The four are
+    also a single ``WHERE`` clause here, so no future edit can pull them apart by
+    adding a branch.
     """
 
 
@@ -183,6 +203,30 @@ def new_token() -> str:
     return secrets.token_urlsafe(TOKEN_BYTES)
 
 
+def new_reset_token() -> str:
+    """A 256-bit random string, in **hexadecimal**, for a password-reset link.
+
+    Hex rather than :func:`new_token`'s URL-safe base64, and the difference is a
+    logging property rather than an aesthetic one. ``infra/redaction.py`` blanks
+    every unbroken run of 32 or more alphanumeric characters, on length alone;
+    ``secrets.token_hex(32)`` is exactly such a run, 64 characters long, so a value
+    that ever reached a log line would be blanked by the formatter before the line
+    was written. ``secrets.token_urlsafe`` emits ``-`` and ``_``, each of which
+    *breaks* that run, and a session cookie printed by accident would survive
+    intact -- which is tolerable for a value that lives only in a ``Set-Cookie``
+    header and is not for a value that travels in a URL, through a mail server,
+    into an inbox, and back through a query string.
+
+    Nothing here logs it. This is the second lock, for the line somebody adds in a
+    hurry, and ``tests/api/test_password_reset.py`` asserts on the *rendered* log
+    output rather than on the call.
+
+    Entropy is unchanged: 32 bytes from the operating system either way. Hex is
+    twice as long on the wire, which costs a URL 21 characters.
+    """
+    return secrets.token_hex(TOKEN_BYTES)
+
+
 def hash_token(token: str) -> str:
     """The digest stored for *token*. See :class:`UserSession` for why SHA-256."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -206,6 +250,22 @@ class SessionLifetimes:
     idle: timedelta
 
 
+@dataclass(frozen=True, slots=True)
+class ResetGrant:
+    """A freshly minted reset link. ``token`` exists here and in one message.
+
+    Carries the account's *stored* address rather than the one the caller typed:
+    the message goes to what the database holds, so a request spelled
+    ``Owner@Example.TEST`` cannot redirect a reset to an address of the caller's
+    choosing, however the normalisation might change one day.
+    """
+
+    address: str
+    display_name: str
+    token: str
+    expires_at: datetime
+
+
 class AuthService:
     """Registration, login, session resolution and revocation."""
 
@@ -220,12 +280,26 @@ class AuthService:
 
     async def register(
         self, *, email: str, password: str, display_name: str, household_name: str
-    ) -> IssuedSession:
+    ) -> UserAccount:
         """Create an account, its first household, and the owner membership.
 
         The three rows are one unit of work: an account without a household could
         sign in and see nothing, and a household without an owner could never be
         administered. The caller's transaction commits all of it or none of it.
+
+        **It no longer starts a session, and that is the point** (pentest finding
+        O-10f). Signing the caller in is only possible on the branch where the
+        address was free, so an endpoint that did it would answer one way for a
+        new address and another for one that already has an account -- which is
+        the enumeration oracle, restated as a status code. Registration therefore
+        answers identically either way and the person is asked to sign in, which
+        they can do immediately with the password they just chose
+        (``api/routers/auth.py``).
+
+        The Argon2 hash below is computed **before** the insert can fail, so both
+        branches pay it. That is not incidental: it is what keeps the two paths
+        indistinguishable by a stopwatch as well as by a response, exactly as
+        :meth:`authenticate` does for sign-in.
         """
         address = self._validated_email(email)
         self._validate_password(password)
@@ -271,7 +345,7 @@ class AuthService:
         )
         await self._session.flush()
 
-        return await self.issue_session(user)
+        return user
 
     async def email_is_taken(self, email: str) -> bool:
         """Whether an account already holds *email*, case-insensitively."""
@@ -394,8 +468,137 @@ class AuthService:
             raise InvalidCurrentPasswordError("the current password does not match")
 
         user.password_hash = self._passwords.hash(new_password)
+        await self._invalidate_reset_tokens(user.id)
         await self._session.flush()
         return user
+
+    # -- Resetting a forgotten password ------------------------------------- #
+    #
+    # The one unauthenticated path that changes an account, and therefore the one
+    # place in this module where every property has to be argued rather than
+    # inherited. Four of them are load-bearing and each is asserted by a test in
+    # ``tests/api/test_password_reset.py``:
+    #
+    # *The token is a row, and using it is a write.* Same argument as the session
+    # and the machine token: a credential the server merely validates is one it
+    # cannot withdraw.
+    #
+    # *The stored value is a digest.* ``hash_token`` on the way in and on the
+    # lookup. A dump of ``password_reset_token`` opens no account.
+    #
+    # *Single use, and superseded by anything that moves the password.* Following
+    # a link consumes it; so does a password change, a later request, and a
+    # completed reset. A link sitting in an inbox after the password moved on is a
+    # key to a rekeyed door.
+    #
+    # *Unknown, expired, used and superseded are one branch.* One ``WHERE``, one
+    # exception, one body at the API. Telling the four apart would confirm that a
+    # reset had been asked for -- the enumeration answer this flow exists to
+    # withhold.
+
+    async def issue_password_reset(self, email: str, *, ttl: timedelta) -> ResetGrant | None:
+        """Mint a reset link for *email*, or ``None`` if there is nobody to mint it for.
+
+        ``None`` covers "no such address" and "the account is disabled"
+        identically. The caller must treat both the same as a success: the HTTP
+        layer answers ``202`` in all three cases and the difference reaches the
+        mailbox, never the response (``api/routers/auth.py``).
+
+        **Every outstanding link for the account is consumed first.** Asking again
+        because the first message has not arrived must not leave two live keys in
+        two inboxes; the newest one wins, which is also what a person expects when
+        they click the button twice.
+
+        A disabled account gets nothing on purpose. Re-enabling it is an
+        operator's decision, and a reset that quietly restored access to an
+        account somebody deliberately switched off would route around that
+        decision without recording it.
+        """
+        address = normalise_email(email)
+        user = await self._session.scalar(
+            select(UserAccount).where(UserAccount.email == address).limit(1)
+        )
+        if user is None or user.disabled_at is not None:
+            return None
+
+        await self._invalidate_reset_tokens(user.id)
+        token = new_reset_token()
+        expires_at = datetime.now(UTC) + ttl
+        self._session.add(
+            PasswordResetToken(user_id=user.id, token_hash=hash_token(token), expires_at=expires_at)
+        )
+        await self._session.flush()
+        return ResetGrant(
+            address=user.email,
+            display_name=user.display_name,
+            token=token,
+            expires_at=expires_at,
+        )
+
+    async def reset_password(self, *, token: str, new_password: str) -> UserAccount:
+        """Set a new password from a link, or raise.
+
+        The order of the two checks is deliberate. :meth:`_validate_password` runs
+        **first**, before the token is looked at, so that a caller who submits a
+        password the policy refuses is told so whether or not their link is any
+        good. The other order would answer "password too weak" for a live token
+        and "invalid link" for a dead one, which is a probe for token validity
+        wearing a helpful message.
+
+        On success: the digest is replaced, **every** session of the account is
+        revoked, and every outstanding reset link -- this one included -- is
+        consumed. All three in one transaction. A reset that left an intruder's
+        session alive would have accomplished nothing, which is the whole reason
+        ``revoke_all`` is called here rather than left to the HTTP layer as it is
+        for a *voluntary* password change: there, the caller holds a session worth
+        keeping; here, the caller holds no session at all and every existing one
+        is suspect by construction.
+        """
+        self._validate_password(new_password)
+
+        now = datetime.now(UTC)
+        record = await self._session.scalar(
+            select(PasswordResetToken)
+            .where(
+                PasswordResetToken.token_hash == hash_token(token),
+                PasswordResetToken.consumed_at.is_(None),
+                PasswordResetToken.expires_at > now,
+            )
+            .limit(1)
+        )
+        if record is None:
+            raise PasswordResetTokenInvalidError("this reset link is not usable")
+
+        user = await self._session.get(UserAccount, record.user_id)
+        if user is None or user.disabled_at is not None:
+            # The account went away or was switched off between the message and
+            # the click. Same answer as a bad token: the holder of the link learns
+            # nothing about which of the two happened.
+            raise PasswordResetTokenInvalidError("this reset link is not usable")
+
+        user.password_hash = self._passwords.hash(new_password)
+        await self._invalidate_reset_tokens(user.id, now=now)
+        await self.revoke_all(user.id)
+        await self._session.flush()
+        return user
+
+    async def _invalidate_reset_tokens(
+        self, user_id: uuid.UUID, *, now: datetime | None = None
+    ) -> None:
+        """Consume every outstanding link for an account.
+
+        Called from three places -- a new request, a voluntary password change and
+        a completed reset -- because all three mean the same thing: whatever links
+        are in flight are no longer the current way into this account.
+        """
+        await self._session.execute(
+            update(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.consumed_at.is_(None),
+            )
+            .values(consumed_at=now if now is not None else datetime.now(UTC))
+        )
 
     async def issue_session_for(self, user_id: uuid.UUID) -> IssuedSession:
         """A new session for an account the caller has already been proved to be.

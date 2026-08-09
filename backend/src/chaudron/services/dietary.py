@@ -190,6 +190,12 @@ class DietaryService:
                     InventoryLot.quantity_value.label("quantity_value"),
                     InventoryLot.quantity_unit_code.label("unit_code"),
                     effective_expiry_sql().label("expires_on"),
+                    # Read as a pair: the expiry above already accounts for both,
+                    # but it cannot say *why* it is three months, and "thaw it
+                    # first" is the difference between a suggestion a household
+                    # can cook tonight and one it cannot.
+                    InventoryLot.frozen_at.label("frozen_at"),
+                    InventoryLot.thawed_at.label("thawed_at"),
                     Product.id.label("product_id"),
                     Product.name.label("product_name"),
                     Product.allergen_state.label("allergen_state"),
@@ -281,6 +287,11 @@ def _to_line(row: Any) -> StockLine:
         quantity=_amount(row.quantity_value),
         unit=row.unit_code,
         expires_on=row.expires_on,
+        # The same predicate as ``ix_inventory_lot_frozen``: frozen *and not
+        # since thawed*. A lot carrying both dates is back on the ordinary clock
+        # -- three days -- and calling it frozen would tell the model to plan a
+        # thaw for something already sitting in the fridge.
+        frozen=row.frozen_at is not None and row.thawed_at is None,
     )
 
 

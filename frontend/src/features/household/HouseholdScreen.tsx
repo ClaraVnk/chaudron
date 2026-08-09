@@ -11,6 +11,8 @@ import {
 } from '../../lib/dietary';
 import { AccountSecurityPanel } from './AccountSecurityPanel';
 import { ExportTargetPanel } from './ExportTargetPanel';
+import { HouseholdAccessPanel } from './HouseholdAccessPanel';
+import { JoinHouseholdPanel } from './JoinHouseholdPanel';
 import { MachineTokenPanel } from './MachineTokenPanel';
 import { MemberForm } from './MemberForm';
 import styles from './Household.module.css';
@@ -237,8 +239,18 @@ export function HouseholdScreen({ state }: Props) {
           everywhere" nobody can find is a remedy nobody has. It sits above the
           two credential panels it is about. */}
       <AccountSecurityPanel />
+      {/* Immediately after the account panel and before the two credential ones,
+          because this is the panel that answers "who else is in here?" — and the
+          list above it answers a different question with a word that looks the
+          same. `HouseholdAccessPanel` says so in its first paragraph.
+
+          `JoinHouseholdPanel` is last of the three and is the one panel on this
+          screen that is not about the household currently selected: it is where
+          somebody who was handed a code turns it into a second household. */}
+      <HouseholdAccessPanel />
       <ExportTargetPanel />
       <MachineTokenPanel />
+      <JoinHouseholdPanel />
     </section>
   );
 }

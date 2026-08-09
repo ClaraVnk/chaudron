@@ -33,6 +33,7 @@ from chaudron.api.deps import (
 )
 from chaudron.api.schemas import (
     DepletedOut,
+    FrozenInventoryItemOut,
     InventoryCreateIn,
     InventoryItemMutatedOut,
     InventoryItemOut,
@@ -55,7 +56,12 @@ from chaudron.domain.ports import (
     display_gtin,
 )
 from chaudron.domain.shopping import DepletionEvent
-from chaudron.services.inventory import AddItemCommand, DepletionSignal, UpdateItemCommand
+from chaudron.services.inventory import (
+    AddItemCommand,
+    DepletionSignal,
+    FreezingOutcome,
+    UpdateItemCommand,
+)
 from chaudron.services.shopping_import import DepletionService
 
 logger = logging.getLogger(__name__)
@@ -91,6 +97,9 @@ def _to_out(item: InventoryItem) -> InventoryItemOut:
         effective_expires_on=item.effective_expiry,
         source=item.entry_source,
         created_at=item.created_at,
+        frozen_at=item.frozen_at,
+        thawed_at=item.thawed_at,
+        freezing_note=item.freezing_note,
     )
 
 
@@ -186,6 +195,62 @@ async def patch_inventory_item(
     return InventoryItemMutatedOut(
         **_to_out(updated.item).model_dump(),
         depleted=await _propose(session, depletion_service, household_id, updated.depletion),
+    )
+
+
+@router.post(
+    "/{item_id}/freeze",
+    response_model=FrozenInventoryItemOut,
+    summary="Freeze a stock item at home",
+)
+async def freeze_inventory_item(
+    household_id: InventoryWriteDep, service: InventoryServiceDep, item_id: uuid.UUID
+) -> FrozenInventoryItemOut:
+    """Put this lot in the household's own freezer.
+
+    A ``POST`` on a sub-resource rather than a field on ``PATCH``, and the reason
+    is that the three refusals have nowhere to live on a ``PATCH``: that verb
+    takes whatever the client sends, and "you may not do this to a lot that has
+    already been thawed" is not a shape a partial update can express. It is also
+    an *event* -- the freezer door closed at a moment -- and the date it writes is
+    the server's, never the client's (``services/inventory.py``).
+
+    ``409`` for all three refusals: the request is well formed, the lot exists,
+    and its state is what forbids the operation.
+    """
+    return _frozen_out(await service.freeze_item(household_id, item_id))
+
+
+@router.post(
+    "/{item_id}/thaw",
+    response_model=FrozenInventoryItemOut,
+    summary="Take a stock item out of the freezer",
+)
+async def thaw_inventory_item(
+    household_id: InventoryWriteDep, service: InventoryServiceDep, item_id: uuid.UUID
+) -> FrozenInventoryItemOut:
+    """Take this lot out of the freezer, and start the three-day clock.
+
+    Answers on a product *sold* frozen as well as on one this household froze:
+    only the second was ever in the freezer by our doing, and both come out of it
+    the same way (migration ``0020``).
+    """
+    return _frozen_out(await service.thaw_item(household_id, item_id))
+
+
+def _frozen_out(outcome: FreezingOutcome) -> FrozenInventoryItemOut:
+    return FrozenInventoryItemOut(
+        **_to_out(outcome.item).model_dump(),
+        location_change=outcome.move.value,
+        moved_to=(
+            None
+            if outcome.moved_to is None
+            else LocationRefOut(
+                id=outcome.moved_to.id, name=outcome.moved_to.name, kind=outcome.moved_to.kind
+            )
+        ),
+        proposes_expiry_date=outcome.proposes_a_date,
+        quality_warning=outcome.quality_warning,
     )
 
 

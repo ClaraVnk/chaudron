@@ -39,6 +39,12 @@ GLOBAL_TABLES: Final[dict[str, str]] = {
     # so a policy keyed on the tenant would have to be satisfied before the tenant
     # is known (migration `0009`).
     "user_session": "one signed-in browser, belonging to an account rather than a household",
+    # Written for a caller who has proved nothing and posted no tenant -- a
+    # stranger asking for a reset link. A policy keyed on the tenant would have to
+    # be satisfied before the tenant is known, the same impossibility as
+    # `user_session`, and the row belongs to an *account* that may open several
+    # households anyway (migration `0023`).
+    "password_reset_token": "one outstanding reset link, belonging to an account, not a household",
     "unit": "shared reference data",
     "llm_provider": "shared reference data",
     # Published public-health guidance and its editions. Per-household copies
@@ -74,6 +80,11 @@ UNIQUE_CONSTRAINT_EXEMPTIONS: Final[dict[str, str]] = {
     # to hash alike, and the only caller able to trigger the error is one who
     # already holds the colliding value.
     "uq_machine_token_token_hash": "the lookup key of a bearer credential, global by necessity",
+    # Same argument, one step earlier: the digest of an invitation is what tells
+    # the redeemer -- who is not a member of anything yet -- which household they
+    # are joining (migration `0022`). A composite index would have to be probed
+    # with the answer it is being asked for.
+    "uq_household_invitation_token_hash": ("the lookup key of an invitation, global by necessity"),
 }
 
 #: References to a tenant-scoped parent that are *not* composite yet, with the reason.

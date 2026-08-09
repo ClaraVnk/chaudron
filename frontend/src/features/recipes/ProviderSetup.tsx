@@ -1,4 +1,5 @@
-import type { ProviderCapabilities } from '../../api/types';
+import { formatDegradedReason, type ProviderCapabilities } from '../../api/types';
+import { ProviderConfigPanel } from '../providers/ProviderConfigPanel';
 import styles from './Recipes.module.css';
 
 /**
@@ -6,42 +7,51 @@ import styles from './Recipes.module.css';
  * either because `GET /v1/providers/capabilities` said `configured: false`, or
  * because `POST /v1/recipes/suggest` answered 409 provider-not-configured.
  *
- * The contract requires a configuration screen here. A 409 rendered as
- * "Erreur 409" tells the user nothing they can act on.
+ * It used to be forty-seven lines of prose telling the reader to edit the server's
+ * environment and restart the service. That was accurate when nothing in the API
+ * created a provider configuration — but it made the product's headline feature
+ * reachable only by whoever had a shell on the host, and, once revision `0016` added
+ * the consent gate, it also asked that person to date an agreement in the
+ * household's name. Consent is not something an operator may give on somebody
+ * else's behalf, so the instruction was not merely inconvenient; it was asking for
+ * a record that would have been false.
+ *
+ * So this screen now *is* the configuration, rather than an explanation of where to
+ * find it: `POST /v1/providers` and the two consent routes exist, and the panel
+ * below drives them. The wrapper keeps only the framing a recipe screen needs —
+ * what still works without a model, and why this household's provider is refused
+ * right now — and hands the rest to `features/providers`, which owns the form, the
+ * consent wording and the list. Kept separable rather than inlined here because the
+ * same panel belongs on the household settings screen too; mounting it there is a
+ * one-line change in a file this work does not own.
  */
 export function ProviderSetup({ capabilities }: { capabilities: ProviderCapabilities | null }) {
+  // `configured: false` with a mode already set is a configuration that exists and
+  // cannot be used — a withdrawn agreement, a key the provider refused, an Ollama
+  // nobody probed. The panel below shows which, and `degraded_reasons` carries the
+  // sentence the server wrote for exactly this state, so it is repeated rather than
+  // paraphrased here.
+  const existing = capabilities?.mode ?? null;
+  const reasons = capabilities?.degraded_reasons ?? [];
+
   return (
     <div className={styles.setup}>
       <h2 className={styles.title}>Suggestions de recettes non configurées</h2>
       <p className={styles.lead}>
         Le reste de Chaudron fonctionne : l’inventaire, le scan et l’ajout d’articles ne dépendent
-        d’aucun fournisseur d’IA. Seules les suggestions de recettes en ont besoin.
+        d’aucun fournisseur d’IA. Seules les suggestions de recettes et la lecture d’un ticket
+        photographié en ont besoin.
       </p>
-      <p className={styles.sectionTitle}>Ce qu’il reste à faire, côté serveur</p>
-      <ol className={styles.setupList}>
-        <li>
-          Choisir un mode : <code>instance_owner</code> (les clés de l’exploitant, réservées à son
-          propre foyer) ou <code>byok</code> (chaque foyer apporte les siennes).
-        </li>
-        <li>
-          Renseigner la configuration du fournisseur dans l’environnement du backend, puis
-          redémarrer le service.
-        </li>
-        <li>
-          Recharger cette page : l’état est relu au démarrage via{' '}
-          <code>GET /v1/providers/capabilities</code>.
-        </li>
-      </ol>
-      {capabilities ? (
-        <p className={styles.summary}>
-          État actuel : mode {capabilities.mode ?? 'non défini'}, fournisseur{' '}
-          {capabilities.provider ?? 'non défini'}.
-        </p>
+
+      {existing !== null && reasons.length > 0 ? (
+        <ul className={styles.setupList}>
+          {reasons.map(formatDegradedReason).map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
       ) : null}
-      <p className={styles.summary}>
-        Aucune clé de fournisseur ne transite par cette interface, et aucune n’est stockée dans le
-        navigateur.
-      </p>
+
+      <ProviderConfigPanel />
     </div>
   );
 }

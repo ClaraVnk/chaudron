@@ -3,6 +3,7 @@ import { describeError } from '../../api/client';
 import { declineRepurchase, deleteInventoryItem, getInventory } from '../../api/endpoints';
 import type {
   DepletedProduct,
+  FrozenInventoryItem,
   InventoryItem,
   RemovalReason,
   StorageLocation,
@@ -243,6 +244,30 @@ export function InventoryScreen({
     [onChanged, noteDepleted],
   );
 
+  /**
+   * A freeze or a thaw changes the lot's date, its badges and often its storage
+   * location, so the row is replaced in place exactly as an adjustment is.
+   *
+   * `onChanged` is called too, and it is not decoration: freezing usually moves
+   * the lot to another location, and the chips at the top of this screen carry
+   * per-location counts that would otherwise be one action out of date.
+   */
+  const frozenItem = useCallback(
+    (updated: FrozenInventoryItem, message: string) => {
+      setResult((previous) =>
+        previous === null
+          ? previous
+          : {
+              ...previous,
+              items: previous.items.map((item) => (item.id === updated.id ? updated : item)),
+            },
+      );
+      setStatus(message);
+      onChanged();
+    },
+    [onChanged],
+  );
+
   const groups = useMemo(() => groupByLocation(items, locations), [items, locations]);
 
   const resetFilters = () => {
@@ -429,6 +454,7 @@ export function InventoryScreen({
                     item={item}
                     onRemove={removeItem}
                     onAdjusted={adjustedItem}
+                    onFrozen={frozenItem}
                   />
                 ))}
               </ul>

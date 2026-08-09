@@ -50,6 +50,12 @@ _ROW_LEVEL_SECURITY_OPTIONAL: Final[frozenset[Environment]] = frozenset({"local"
 #: pydantic-settings' JSON decoder -- which would reject ``a,b`` outright.
 CommaSeparated = Annotated[list[str], NoDecode]
 
+#: Hosts a browser already treats as trustworthy origins, and where a relay
+#: reached over a clear connection is reached over no network at all. Used by the
+#: two SMTP rules below, and spelled once so they cannot disagree about what
+#: "local" means.
+_LOOPBACK_HOSTS: Final[frozenset[str]] = frozenset({"localhost", "127.0.0.1", "[::1]", "::1"})
+
 
 class ConfigurationError(RuntimeError):
     """Raised when the environment cannot produce a usable configuration."""
@@ -170,6 +176,82 @@ class Settings(BaseSettings):
     inbound_email_webhook_key: SecretStr | None = None
     inbound_email_domain: str | None = None
     inbound_email_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+
+    # -- Outbound email ----------------------------------------------------- #
+    #
+    # **Optional, and the whole design turns on that.** This is self-hosted
+    # software and a great many installs have no mail relay at all, so "no SMTP"
+    # is a normal configuration rather than an incomplete one. What is *not*
+    # allowed is a half-filled one: a host without a sender address, or
+    # credentials without transport security, fails at startup like everything
+    # else in this file. The three validators at the bottom of the class are that
+    # rule, and the reason is the one ``docs/security-model.md`` gives for wanting
+    # SMTP validated at startup in the first place -- a send that fails silently
+    # turns "I did not receive the message" into an incident nobody can close.
+    #
+    # What follows from the absence is decided in ``api/routers/auth.py``:
+    # ``GET /v1/auth/capabilities`` says so out loud and the reset endpoints
+    # answer ``503``. They do **not** accept a request and drop it.
+
+    #: The relay's hostname. ``None`` -- the default -- disables outbound mail,
+    #: and with it password reset. Everything else in this block is inert until it
+    #: is set.
+    smtp_host: str | None = None
+
+    #: 587 is the submission port, which is where ``starttls`` belongs. Use 465
+    #: with ``implicit-tls``, and 25 only for a relay on the loopback.
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+
+    #: How the connection is protected. Defaults to the one that is right on a
+    #: submission port; ``none`` exists for a relay reached over the loopback and
+    #: is refused below when it is paired with credentials anywhere else.
+    smtp_security: Literal["starttls", "implicit-tls", "none"] = "starttls"
+
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+
+    #: The ``From`` address. **Required whenever a host is set**, because a
+    #: message without one is refused by every relay worth using and by most spam
+    #: filters, and discovering that from a bounce is discovering it too late.
+    smtp_from: str | None = None
+
+    #: Seconds for the whole SMTP conversation. Short on purpose: the send runs in
+    #: a worker thread off the request path (``infra/email/smtp.py``), so this
+    #: bounds a thread rather than a response, and a relay that has not answered in
+    #: fifteen seconds is not going to.
+    smtp_timeout_seconds: float = Field(default=15.0, gt=0)
+
+    #: Where the **interface** is served, when that is not where the API is. It is
+    #: what a reset link points at, and it has to be a page a browser can open --
+    #: ``base_url`` is the API, and on a split deployment opening it lands on JSON.
+    #: ``None`` means "the same as ``base_url``", which is the same-origin case.
+    public_app_url: str | None = None
+
+    #: How long a password-reset link lives. One hour: long enough for a message
+    #: to clear a greylisting relay and for somebody to read it after dinner,
+    #: short enough that a link left in an inbox is not a standing key. Bounded at
+    #: both ends because neither five minutes nor a day is a defensible number to
+    #: reach by typo.
+    password_reset_ttl_minutes: int = Field(default=60, ge=15, le=1440)
+
+    #: Reset *requests* per source address per hour. Bounds one host walking a
+    #: list of addresses to see whose mailbox it can fill.
+    password_reset_requests_per_ip_per_hour: int = Field(default=10, ge=1)
+
+    #: Messages this instance will send **to one address** per hour, counted
+    #: across registration notices and reset requests alike. The limit that
+    #: protects a *third party*: without it, anyone could use the reset form to
+    #: post a message into somebody else's inbox as fast as they can loop. It is
+    #: charged whether or not the address has an account, for the same reason the
+    #: sign-in limiter is -- a counter that only ticks for real accounts answers
+    #: the question the endpoint refuses to.
+    account_emails_per_address_per_hour: int = Field(default=3, ge=1)
+
+    #: Reset *completions* per source address per hour -- the endpoint that
+    #: consumes a token. Guessing is already hopeless against 256 bits, so this is
+    #: not what stops a brute force; it stops the attempt from being free, and it
+    #: bounds the Argon2 hash each call pays for.
+    password_reset_attempts_per_ip_per_hour: int = Field(default=20, ge=1)
 
     # -- Abuse and availability limits -------------------------------------- #
     # See ``api/throttling.py`` for what these bound and, just as importantly,
@@ -532,6 +614,115 @@ class Settings(BaseSettings):
                 "itself, or no document can be read at all"
             )
         return self
+
+    @model_validator(mode="after")
+    def _require_a_sender_address_when_mail_is_configured(self) -> Settings:
+        """A relay without a ``From`` address is a relay that bounces everything.
+
+        Checked here rather than at the first send, which is the whole argument of
+        this module: the first send is a password reset, in an incident, for a
+        person who cannot get into their account -- the worst possible moment to
+        discover a configuration error, and one whose only symptom is silence.
+
+        The address is also refused if it carries a control character. That is not
+        hygiene: ``From`` is a header, and a value with a bare CRLF in it appends
+        headers of somebody's choosing to every message this instance sends. The
+        *recipient* is guarded in ``domain/email_ports.py`` on every message; this
+        one is fixed at startup, so it is guarded once, here.
+        """
+        if self.smtp_host is None:
+            return self
+        sender = (self.smtp_from or "").strip()
+        if not sender:
+            raise ValueError(
+                "CHAUDRON_SMTP_FROM is required when CHAUDRON_SMTP_HOST is set: a message "
+                "with no From address is refused by every relay worth using, and the first "
+                "message this instance sends is a password reset nobody can wait for"
+            )
+        if "@" not in sender.strip("@"):
+            raise ValueError("CHAUDRON_SMTP_FROM must be an email address")
+        if any(character in sender for character in "\r\n\x00"):
+            raise ValueError(
+                "CHAUDRON_SMTP_FROM may not contain control characters: it is written into "
+                "a message header, and a newline there appends headers of its own"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_smtp_credentials_over_a_clear_connection(self) -> Settings:
+        """Credentials on an unencrypted socket are credentials on the wire.
+
+        ``smtp_security="none"`` is legitimate for a relay listening on the
+        loopback of the same host -- a common self-hosted arrangement, and one
+        where there is no network for anything to be read from. It is never
+        legitimate with a username, anywhere else: SMTP ``AUTH LOGIN`` is base64,
+        which is not encryption, and the same connection then carries the reset
+        link.
+
+        Refused rather than silently upgraded to ``starttls``: an operator who
+        wrote ``none`` believes something about their network, and quietly doing
+        the other thing would leave that belief untested.
+        """
+        if self.smtp_host is None or self.smtp_username is None:
+            return self
+        if self.smtp_security != "none":
+            return self
+        if self.smtp_host.strip().lower() in _LOOPBACK_HOSTS:
+            return self
+        raise ValueError(
+            "CHAUDRON_SMTP_SECURITY cannot be 'none' when CHAUDRON_SMTP_USERNAME is set and "
+            "the relay is not on the loopback: SMTP AUTH is base64, not encryption, and the "
+            "same connection carries the password-reset link. Use 'starttls' (port 587) or "
+            "'implicit-tls' (port 465)"
+        )
+
+    @model_validator(mode="after")
+    def _require_https_reset_links_in_production(self) -> Settings:
+        """A reset link is a bearer credential in a URL; it does not travel in clear.
+
+        The same rule ``_require_https_in_production`` applies to the session
+        cookie, applied to the other secret this application puts in front of a
+        browser. It bites on the *interface's* URL rather than the API's, because
+        that is what the link points at, and on a split deployment the two are not
+        the same host.
+
+        ``localhost`` and ``127.0.0.1`` are exempt for the reason given there:
+        browsers already treat them as trustworthy origins, and a developer
+        pointing at their own machine is not shipping anything.
+        """
+        if not self.is_production or self.smtp_host is None:
+            return self
+        url = self.app_url.lower()
+        if url.startswith("https://"):
+            return self
+        if any(url.startswith(f"http://{host}") for host in _LOOPBACK_HOSTS):
+            return self
+        raise ValueError(
+            "CHAUDRON_PUBLIC_APP_URL (or CHAUDRON_BASE_URL, when it is unset) must be an "
+            "https:// URL in production once CHAUDRON_SMTP_HOST is set: it is what the "
+            "password-reset links point at, and a reset token is a credential"
+        )
+
+    @property
+    def email_enabled(self) -> bool:
+        """Whether this instance can send mail, and therefore reset a password.
+
+        Read by the application factory to decide whether to build a mailer at
+        all, and by ``GET /v1/auth/capabilities`` so the interface can leave out a
+        "forgot my password" link that would lead to an apology.
+        """
+        return self.smtp_host is not None
+
+    @property
+    def app_url(self) -> str:
+        """Where the interface lives, for the links this instance puts in a message.
+
+        ``public_app_url`` when it is set, ``base_url`` otherwise. The fallback is
+        right for the ordinary deployment, where one origin serves the PWA and
+        proxies ``/v1`` to the API; the override exists for the one where it does
+        not, and without it a reset link would land on JSON.
+        """
+        return (self.public_app_url or self.base_url).strip().rstrip("/")
 
     @property
     def is_production(self) -> bool:

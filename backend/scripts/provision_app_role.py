@@ -85,9 +85,15 @@ _TENANT_FUNCTION: Final = "chaudron_current_household()"
 #: Revision ``0014`` revokes ``PUBLIC``. **This list is the other half of that
 #: change**: without the grants below, the API cannot resolve a session or a token
 #: and answers ``401`` to every request. Run this script after that migration.
+#: ``chaudron_resolve_household_invitation`` (revision ``0022``) is the third and
+#: joined the list with its ``REVOKE`` already written into the migration that
+#: creates it, rather than retrofitted a revision later. Without the grant below,
+#: every attempt to join a household is refused as though the invitation did not
+#: exist -- which is the correct failure mode and an impossible one to diagnose.
 _DEFINER_FUNCTIONS: Final[tuple[str, ...]] = (
     "chaudron_user_memberships(uuid)",
     "chaudron_resolve_machine_token(text)",
+    "chaudron_resolve_household_invitation(text)",
 )
 
 #: Everything the role must be able to execute: the three functions above plus the

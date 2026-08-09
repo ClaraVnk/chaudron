@@ -5,6 +5,11 @@ import type {
   BudgetPeriod,
   BudgetTarget,
   CreateInventoryItem,
+  FrozenInventoryItem,
+  HouseholdAccess,
+  HouseholdInvitation,
+  HouseholdInvitationCreated,
+  HouseholdInvitationDraft,
   HouseholdMember,
   InventoryItem,
   InventoryItemPatch,
@@ -24,6 +29,7 @@ import type {
   ReceiptConfirmResult,
   RecipeFeedbackState,
   RecipeFeedbackVerdict,
+  RedeemedInvitation,
   RemovalReason,
   RemovalResult,
   ShoppingExportReceipt,
@@ -98,6 +104,42 @@ export function updateInventoryItem(
   return request<UpdatedInventoryItem>(`/inventory/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: patch,
+    signal,
+  });
+}
+
+/**
+ * Records that the household put this lot in its own freezer.
+ *
+ * A `POST` on a sub-resource rather than a field on the PATCH, because the server
+ * refuses three cases outright and a partial update has no shape for "not on a lot
+ * in that state": food already past its date (freezing halts spoilage, it does not
+ * reverse it), food that has been thawed (never refrozen), and a lot already
+ * frozen, which would otherwise buy another three months for a double tap. All
+ * three come back as `409` with a sentence to show.
+ *
+ * No body: the date is the server's. A client able to choose `frozen_at` is a
+ * client able to choose its own expiry date.
+ */
+export function freezeInventoryItem(
+  id: string,
+  signal?: AbortSignal,
+): Promise<FrozenInventoryItem> {
+  return request<FrozenInventoryItem>(`/inventory/${encodeURIComponent(id)}/freeze`, {
+    method: 'POST',
+    signal,
+  });
+}
+
+/**
+ * Takes the lot out of the freezer, and starts the three-day clock.
+ *
+ * Also answers for something *sold* frozen, which this household never froze and
+ * can still thaw.
+ */
+export function thawInventoryItem(id: string, signal?: AbortSignal): Promise<FrozenInventoryItem> {
+  return request<FrozenInventoryItem>(`/inventory/${encodeURIComponent(id)}/thaw`, {
+    method: 'POST',
     signal,
   });
 }
@@ -569,6 +611,79 @@ export function confirmReceipt(
 export function discardReceipt(receiptId: string, signal?: AbortSignal): Promise<void> {
   return request<void>(`/receipts/${encodeURIComponent(receiptId)}`, {
     method: 'DELETE',
+    signal,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Household access (who may sign in) and the invitations that create it
+// ---------------------------------------------------------------------------
+
+/** Every account that may open this household. Readable by all of them. */
+export function getHouseholdAccess(signal?: AbortSignal): Promise<HouseholdAccess[]> {
+  return request<HouseholdAccess[]>('/households/members', { signal });
+}
+
+/**
+ * Revoke somebody's access, or leave the household.
+ *
+ * An owner may remove anybody; anybody else may remove only themselves. The one
+ * refusal that is not about authority is `409 household-would-have-no-owner`:
+ * the last owner cannot leave, because what becomes of a household with nobody
+ * in it is a question the product has not answered.
+ */
+export function removeHouseholdAccess(userId: string, signal?: AbortSignal): Promise<void> {
+  return request<void>(`/households/members/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    signal,
+  });
+}
+
+/** The invitations that could still be used. Owner only. */
+export function getHouseholdInvitations(signal?: AbortSignal): Promise<HouseholdInvitation[]> {
+  return request<HouseholdInvitation[]>('/households/invitations', { signal });
+}
+
+/**
+ * Create an invitation. **The only response that carries the value.**
+ *
+ * There is no route that reads it back, and Chaudron sends no email: the value
+ * is handed over out of band, by whatever means the household already uses.
+ */
+export function createHouseholdInvitation(
+  body: HouseholdInvitationDraft,
+  signal?: AbortSignal,
+): Promise<HouseholdInvitationCreated> {
+  return request<HouseholdInvitationCreated>('/households/invitations', {
+    method: 'POST',
+    body,
+    signal,
+  });
+}
+
+export function revokeHouseholdInvitation(id: string, signal?: AbortSignal): Promise<void> {
+  return request<void>(`/households/invitations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    signal,
+  });
+}
+
+/**
+ * Join a household with an invitation.
+ *
+ * Under `/auth` rather than `/households`, and that is the server's design
+ * rather than an accident: the caller is not a member of the household yet, so
+ * there is nothing for `X-Household-Id` to be checked against. The invitation
+ * decides which household this is. Adopting a fresh session afterwards is what
+ * makes the new household appear in the picker.
+ */
+export function redeemHouseholdInvitation(
+  token: string,
+  signal?: AbortSignal,
+): Promise<RedeemedInvitation> {
+  return request<RedeemedInvitation>('/auth/invitations/redeem', {
+    method: 'POST',
+    body: { token },
     signal,
   });
 }

@@ -62,7 +62,12 @@ __all__ = [
     "LocationRepository",
     "LocationSummary",
     "LocationView",
+    "LotAlreadyExpiredError",
+    "LotAlreadyFrozenError",
+    "LotAlreadyThawedError",
     "LotDraft",
+    "LotFreezingState",
+    "LotNotFrozenError",
     "LotState",
     "LotUpdate",
     "Maybe",
@@ -198,6 +203,69 @@ class InventoryConflictError(DomainError):
     The database arbitrates (``uq_inventory_lot_merge_key``); the loser is told
     to retry rather than being served a fabricated result.
     """
+
+
+# -- Home freezing (``domain/shelf_life.py``) ------------------------------- #
+#
+# Four refusals, and each one protects the *computed date* rather than the
+# user's judgement. That is the line drawn here: what a household does with its
+# own freezer is its business, and the application records it. What the
+# application must not do is derive a date from a state that cannot honestly
+# produce one -- which is exactly what each of these would be.
+
+
+class LotAlreadyExpiredError(DomainError):
+    """The lot was already past its effective date when the freezer was asked for.
+
+    Freezing halts spoilage; it does not reverse it. Accepting this would void a
+    use-by that had already been crossed and replace it with three months, which
+    is the single most dangerous thing this feature could compute.
+    """
+
+    def __init__(self, item_id: uuid.UUID) -> None:
+        super().__init__(f"inventory item {item_id} is already past its effective expiry date")
+        self.item_id = item_id
+
+
+class LotAlreadyThawedError(DomainError):
+    """A lot carrying ``thawed_at`` cannot go back into the freezer.
+
+    ANSES, and the rule with the shortest fuse in this application: a thawed
+    food keeps three days, refrigerated, and refreezing it restarts nothing --
+    it only hides how long it has already spent above freezing.
+    """
+
+    def __init__(self, item_id: uuid.UUID) -> None:
+        super().__init__(f"inventory item {item_id} has been thawed and must not be refrozen")
+        self.item_id = item_id
+
+
+class LotAlreadyFrozenError(DomainError):
+    """The lot is already in the freezer, and freezing it twice would move its date.
+
+    Not a tidiness refusal. ``effective_expiry`` counts from ``frozen_at``, so a
+    second freeze on a lot frozen two months ago would silently hand it another
+    three months. The application would be extending a date on the strength of a
+    duplicate tap.
+    """
+
+    def __init__(self, item_id: uuid.UUID) -> None:
+        super().__init__(f"inventory item {item_id} is already frozen")
+        self.item_id = item_id
+
+
+class LotNotFrozenError(DomainError):
+    """Nothing to take out of the freezer.
+
+    True of a lot this household never froze *and* whose product was not sold
+    frozen -- the second case is why this is not simply ``frozen_at IS NULL``
+    (migration ``0020``). Writing ``thawed_at`` on a lot that was never cold
+    would start the three-day clock on a tin of chickpeas.
+    """
+
+    def __init__(self, item_id: uuid.UUID) -> None:
+        super().__init__(f"inventory item {item_id} is not frozen")
+        self.item_id = item_id
 
 
 # -- Dietary constraints (ADR-0009, contract v1.1) ------------------------- #
@@ -373,6 +441,20 @@ class InventoryItem:
     effective_expiry: date | None
     entry_source: StockEntrySource
     created_at: datetime
+    #: When this household put the lot in its own freezer, and when it took it
+    #: out. Both are carried, and both are dates rather than one flag, because
+    #: they are what ``effective_expiry`` above was computed *from*: a client
+    #: showing "périme dans 3 mois" with no way to say why is a client whose user
+    #: reasonably concludes the application has lost track of the chicken.
+    frozen_at: date | None = None
+    thawed_at: date | None = None
+    #: The family's freezing advice, verbatim from ``shelf_life_guideline``.
+    #:
+    #: Read on the *list* rather than only in the answer to a freeze, because its
+    #: two most important sentences -- a shell egg bursts, a sealed tin bursts --
+    #: are worth reading **before** the freezer door closes. ``None`` where the
+    #: product resolved to no family at all.
+    freezing_note: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,6 +519,38 @@ class LotState:
 
 
 @dataclass(frozen=True, slots=True)
+class LotFreezingState:
+    """Everything the freeze and thaw use cases have to read before they decide.
+
+    A separate projection from :class:`LotState`, and not an extension of it, for
+    one reason: three of these five fields do not live on ``inventory_lot`` at
+    all. ``effective_expiry`` is computed by the query, and the two guideline
+    fields come from a table joined through ``product.food_family``. Widening
+    ``LotState`` would have made every caller of ``get_state`` -- the quantity
+    correction, the removal -- pay for a two-table join they have no use for.
+    """
+
+    id: uuid.UUID
+    product_id: uuid.UUID
+    storage_location_id: uuid.UUID | None
+    frozen_at: date | None
+    thawed_at: date | None
+    #: The rule of ``domain/shelf_life.py`` as it stands *now*, computed in SQL by
+    #: the same expression the listing sorts on. Read rather than recomputed here
+    #: so that "is this lot already expired?" has exactly one answer in the whole
+    #: application.
+    effective_expiry: date | None
+    #: The family's figure, or ``None`` where this application proposes no date
+    #: for a frozen lot of this family. Never "keeps indefinitely".
+    home_frozen_days: int | None
+    freezing_note: str | None
+    #: ``True`` when the product was *sold* frozen (``FoodFamily.FROZEN``), which
+    #: is the one way a lot can legitimately be thawed without this household
+    #: ever having frozen it (migration ``0020``).
+    sold_frozen: bool
+
+
+@dataclass(frozen=True, slots=True)
 class LotUpdate:
     """A partial change. ``UNSET`` leaves a column alone, ``None`` clears it."""
 
@@ -448,6 +562,8 @@ class LotUpdate:
     best_before: Maybe[date | None] = UNSET
     date_kind: Maybe[ExpiryDateKind] = UNSET
     opened_at: Maybe[date | None] = UNSET
+    frozen_at: Maybe[date | None] = UNSET
+    thawed_at: Maybe[date | None] = UNSET
 
 
 @dataclass(frozen=True, slots=True)
@@ -517,6 +633,18 @@ class LocationRepository(Protocol):
     async def create(self, household_id: uuid.UUID, draft: LocationDraft) -> LocationSummary:
         """Add an active location, or raise :class:`LocationNameTakenError`."""
 
+    async def sole_of_kind(
+        self, household_id: uuid.UUID, kind: StorageKind
+    ) -> LocationSummary | None:
+        """The household's only active location of that kind, or ``None``.
+
+        *Sole*, and the word is the whole contract: two freezers give ``None``
+        just as none at all does. Freezing moves a lot to the freezer, and with
+        two of them the application does not know which door was opened -- so it
+        moves nothing and says so, rather than filing the chicken in the garage
+        chest freezer because that row sorted first.
+        """
+
 
 class ProductRepository(Protocol):
     async def get_visible(
@@ -550,6 +678,16 @@ class InventoryRepository(Protocol):
 
     async def get_item(self, household_id: uuid.UUID, item_id: uuid.UUID) -> InventoryItem | None:
         """Load the display projection of a lot."""
+
+    async def get_freezing_state(
+        self, household_id: uuid.UUID, item_id: uuid.UUID
+    ) -> LotFreezingState | None:
+        """Load what the freeze and thaw use cases decide on, locking the lot."""
+
+    async def location_holds_twin(
+        self, household_id: uuid.UUID, item_id: uuid.UUID, location_id: uuid.UUID
+    ) -> bool:
+        """Whether moving this lot there would collide with ``uq_inventory_lot_merge_key``."""
 
     async def find_mergeable(self, household_id: uuid.UUID, draft: LotDraft) -> LotState | None: ...
 

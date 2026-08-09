@@ -7,6 +7,8 @@ from chaudron.api.routers.health import router as health_router
 from chaudron.api.routers.inventory import router as inventory_router
 from chaudron.api.routers.locations import router as locations_router
 from chaudron.api.routers.members import router as members_router
+from chaudron.api.routers.memberships import redeem_router as invitation_redeem_router
+from chaudron.api.routers.memberships import router as memberships_router
 from chaudron.api.routers.privacy import router as privacy_router
 from chaudron.api.routers.products import router as products_router
 from chaudron.api.routers.providers import router as providers_router
@@ -21,8 +23,10 @@ __all__ = [
     "export_targets_router",
     "health_router",
     "inventory_router",
+    "invitation_redeem_router",
     "locations_router",
     "members_router",
+    "memberships_router",
     "privacy_router",
     "products_router",
     "providers_router",
