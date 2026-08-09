@@ -308,12 +308,18 @@ nothing is computed until you ask.
 | <img src="docs/screenshots/freezing.webp" alt="Chicken fillets, now filed under the freezer, badged as frozen, good until November, with the printed August use-by kept underneath as a footnote" width="240"> | <img src="docs/screenshots/household-access.webp" alt="The accounts that can open this household, with roles, distinguished from the people who eat here" width="240"> | <img src="docs/screenshots/provider-setup.webp" alt="The provider screen on a fresh instance, explaining that nothing leaves until a provider is registered" width="240"> |
 
 **Left — the whole freezing feature in one frame.** Those chicken fillets were
-bought with a use-by of **10 August**. They have been frozen, so they have moved
-into the freezer, they read *good until 6 November*, and the printed date is
+bought with a use-by of **11 August**. They have been frozen, so they have moved
+into the freezer, they read *good until 7 November*, and the printed date is
 still on the row underneath. Nothing was overwritten: the application does not
 erase what somebody read off the packaging, it says what it now believes and
 shows its working. Take them out and the date drops to three days — refrigerated,
 and never refrozen. Those are ANSES's rules, not ours.
+
+Every screenshot on this page was taken by driving a browser through the real
+application against a live backend, and this one by pressing the button: the
+capture script freezes an actual lot and photographs the result rather than
+seeding a frozen row, because a seeded row would produce the same picture and
+prove nothing about the button.
 
 **Middle — accounts, not eaters, and the screen says so in as many words.** The
 people higher up that tab are who you cook *for*: an infant, someone who will
