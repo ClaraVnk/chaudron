@@ -13,6 +13,7 @@ import { takeResetToken } from './features/auth/resetLink';
 import { AddItemScreen } from './features/add/AddItemScreen';
 import { BudgetScreen } from './features/budget/BudgetScreen';
 import { HouseholdScreen } from './features/household/HouseholdScreen';
+import { JoinHouseholdPanel } from './features/household/JoinHouseholdPanel';
 import { InventoryScreen } from './features/inventory/InventoryScreen';
 import { RecipesScreen } from './features/recipes/RecipesScreen';
 import { ShoppingScreen } from './features/shopping/ShoppingScreen';
@@ -100,7 +101,11 @@ function Shell({ tab, onTabChange }: ShellProps) {
         <AccountMenu />
       </header>
 
-      <DegradedBanner />
+      <DegradedBanner
+        onConfigureProvider={() => {
+          onTabChange('recipes');
+        }}
+      />
 
       <main className={styles.main} id="main" tabIndex={-1}>
         {tab === 'inventory' ? (
@@ -215,13 +220,25 @@ function Gate({ tab, onTabChange }: ShellProps) {
 
   if (!activeHousehold) {
     if (session.households.length === 0) {
+      // Reachable today, and not only in theory: an owner who leaves a household
+      // that still has another owner ends up here. It used to be a dead end —
+      // "ask an owner to invite you" and a sign-out button — even for somebody
+      // who had already been sent a code, because the panel that redeems one
+      // lived inside `HouseholdScreen` and the shell never reaches that screen
+      // without an active household. `JoinHouseholdPanel` is mounted here
+      // instead: it is the one panel that sends no `X-Household-Id`, precisely
+      // because the account is not yet a member of the household it is joining,
+      // so it works with nothing selected. It re-reads the session on success,
+      // which leaves exactly one household, which `SessionProvider` then adopts
+      // on its own — this screen unmounts and the shell appears.
       return (
         <main className={styles.fatal}>
           <h1>Aucun foyer</h1>
           <p>
             Votre compte n’appartient à aucun foyer. Demandez au propriétaire d’un foyer de vous
-            inviter.
+            inviter, puis collez ci-dessous le code qu’il vous transmettra.
           </p>
+          <JoinHouseholdPanel />
           <button type="button" onClick={() => void signOut()}>
             Se déconnecter
           </button>

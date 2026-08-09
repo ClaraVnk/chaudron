@@ -25,6 +25,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from chaudron.api.errors import register_exception_handlers
 from chaudron.api.middleware import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 from chaudron.api.routers import (
+    account_router,
     balance_router,
     budget_router,
     export_targets_router,
@@ -406,6 +407,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # The data-subject rights (GDPR 15, 17, 20). Registered last among the /v1
     # routers because it is the one that removes what the others wrote.
     app.include_router(privacy_router)
+    # Article 17 over the person rather than over a household, and the only /v1
+    # route that resolves no tenant at all -- an account belongs to none.
+    app.include_router(account_router)
     app.include_router(tokens_router)
     return app
 

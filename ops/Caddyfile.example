@@ -211,6 +211,17 @@
 					delete barcode
 					delete code
 					delete token
+					# `reset` carries a **live single-use password-reset token**,
+					# and it is the only entry on this list that is a credential
+					# rather than a fact about somebody's shopping. It was missing:
+					# the list was written when `token` was the only credential in
+					# a query string, and the reset flow arrived afterwards under a
+					# different parameter name. Without this line every click on a
+					# reset link wrote a working credential into journald, where it
+					# sat for the 30 days §4 gives the access log -- long outliving
+					# the token's own hour, and readable by anyone who can read the
+					# journal.
+					delete reset
 				}
 				request>remote_ip ip_mask {
 					ipv4 24
@@ -458,6 +469,33 @@
 		}
 		respond 204
 	}
+
+	# A password-reset link that landed on the public page, forwarded to the
+	# application that can actually read it.
+	#
+	# `services/account_email.py` builds `{app_url}/?reset=<token>` — a query
+	# parameter on the *root*, and its own comment explains why: "this
+	# application has no router and is served as a single document, so a path
+	# would need a rewrite rule in whatever serves it". That was true when the
+	# application was the root. It stopped being true when the public page took
+	# that address and the application moved under `/app/`, and nothing re-read
+	# the sentence. The link then opened a page carrying no JavaScript at all,
+	# `takeResetToken()` never ran, and the only account-recovery path this
+	# product has was dead in exactly the deployment this file describes.
+	#
+	# Setting `CHAUDRON_PUBLIC_APP_URL=https://host/app` also fixes it and is
+	# documented in `.env.example`. This rule is here as well because that
+	# variable is one an operator can leave empty — and its failure is silent,
+	# discovered by the first person who forgets a password. Two mechanisms, one
+	# of which does not depend on anybody remembering.
+	#
+	# The token survives the redirect in a `Location` header; the log filter
+	# above drops `reset` from both this request and the redirected one.
+	@reset_on_root {
+		path /
+		query reset=*
+	}
+	redir @reset_on_root /app/?reset={http.request.uri.query.reset} 302
 
 	# Everything else: the landing page and its static companions. The only
 	# handler that does not set X-Robots-Tag, on purpose.

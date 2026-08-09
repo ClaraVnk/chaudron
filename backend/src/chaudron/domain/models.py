@@ -2294,9 +2294,26 @@ class RecipeSuggestion(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     # What we sent to the model. Without it, "why did it suggest that when I had no
     # eggs?" is unanswerable. Also the most sensitive row in the database: it is a
-    # complete inventory of a home, and falls under the same retention policy as
-    # receipt images.
-    stock_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # complete inventory of a home, and `docs/security-model.md` 8.2 gives it the
+    # shortest retention in the system.
+    #
+    # **Nullable since revision 0027, and NULL means "no longer held".** The
+    # retention job clears the column rather than deleting the suggestion, because
+    # the suggestion's title, steps, rating and cost are what make the feature
+    # reviewable and none of them is an inventory of somebody's cupboards. It is
+    # nullable rather than emptied to `{}`: an empty object would satisfy the old
+    # NOT NULL and record that the household had nothing in stock, which is a
+    # fabricated fact rather than a missing one.
+    stock_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        comment=(
+            "What was sent to the model: a complete inventory of the household, and "
+            "the most sensitive column in this database (security-model.md 8.2). "
+            "NULL means the retention job has dropped it, NOT that the household had "
+            "nothing in stock -- an empty object here would have been a fabricated "
+            "fact. See scripts/purge_retained_data.py and revision 0027."
+        ),
+    )
 
     # Copied from the configuration rather than only referenced: the configuration
     # can change or be deleted, while a three-month-old suggestion must keep saying
@@ -2402,6 +2419,17 @@ class RecipeSuggestion(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
             "model",
             "feedback",
             postgresql_where=text("feedback IS NOT NULL"),
+        ),
+        # The retention job (`scripts/purge_retained_data.py`), which clears
+        # `stock_snapshot` by age across every tenant at once and therefore wants an
+        # index on age alone -- the same shape, and the same reason, as
+        # `ix_rate_limit_bucket_updated_at`. Partial on the rows still holding a
+        # snapshot, so it shrinks as the job works and a run with nothing to do
+        # reads nothing.
+        Index(
+            "ix_recipe_suggestion_snapshot_retention",
+            "created_at",
+            postgresql_where=text("stock_snapshot IS NOT NULL"),
         ),
     )
 

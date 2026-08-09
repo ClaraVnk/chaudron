@@ -9,6 +9,7 @@ from chaudron.api.routers.locations import router as locations_router
 from chaudron.api.routers.members import router as members_router
 from chaudron.api.routers.memberships import redeem_router as invitation_redeem_router
 from chaudron.api.routers.memberships import router as memberships_router
+from chaudron.api.routers.privacy import account_router
 from chaudron.api.routers.privacy import router as privacy_router
 from chaudron.api.routers.products import router as products_router
 from chaudron.api.routers.providers import router as providers_router
@@ -18,6 +19,7 @@ from chaudron.api.routers.shopping import router as shopping_router
 from chaudron.api.routers.tokens import router as tokens_router
 
 __all__ = [
+    "account_router",
     "balance_router",
     "budget_router",
     "export_targets_router",

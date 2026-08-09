@@ -29,10 +29,30 @@ import styles from './Household.module.css';
  * cannot distinguish "never existed" from "expired", "revoked" or "already
  * used", and inventing a distinction the API refuses to make would be inventing
  * it wrong.
+ *
+ * **Two call sites, and the difference between them is read off the session
+ * rather than passed in.** The panel sits on the household settings screen,
+ * where it is one option among several and starts collapsed; it also sits on the
+ * "no household" screen in `App.tsx`, where it is the *only* thing to do and so
+ * starts open with its own framing. Deriving that from
+ * `session.households.length` rather than from a prop means the two call sites
+ * cannot disagree with what is actually true of the account — an account with no
+ * membership can never be told it will "keep its current household".
+ *
+ * That second call site is what makes an invitation redeemable at all for
+ * somebody with no household. This panel used to live only inside
+ * `HouseholdScreen`, which the shell reaches only once a household is active, so
+ * an account with zero memberships — an owner who left a household that still
+ * had another owner, which is reachable today — had a screen with nothing on it
+ * but *sign out*, and no way to paste the code that would let them back in.
  */
 export function JoinHouseholdPanel() {
-  const { adopt, selectHousehold } = useSession();
-  const [open, setOpen] = useState(false);
+  const { session, adopt, selectHousehold } = useSession();
+  // An account with no membership has nothing else it could be doing here, so
+  // the form is already open: one less tap on the one screen where the tap has
+  // no alternative.
+  const withoutHousehold = session !== null && session.households.length === 0;
+  const [open, setOpen] = useState(withoutHousehold);
   const [code, setCode] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,9 +107,9 @@ export function JoinHouseholdPanel() {
       </h2>
 
       <p className={styles.lead}>
-        Si quelqu’un vous a transmis un code d’invitation, collez-le ici. Vous garderez votre compte
-        et votre foyer actuel : un compte peut appartenir à plusieurs foyers, et le sélecteur en
-        haut de l’écran sert à passer de l’un à l’autre.
+        {withoutHousehold
+          ? 'Si quelqu’un vous a transmis un code d’invitation, collez-le ici : vous rejoindrez son foyer et retrouverez vos écrans immédiatement, sans créer de compte supplémentaire.'
+          : 'Si quelqu’un vous a transmis un code d’invitation, collez-le ici. Vous garderez votre compte et votre foyer actuel : un compte peut appartenir à plusieurs foyers, et le sélecteur en haut de l’écran sert à passer de l’un à l’autre.'}
       </p>
 
       {joined !== null ? (

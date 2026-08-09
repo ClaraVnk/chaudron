@@ -19,6 +19,7 @@ The end-to-end behaviour -- which message goes where, and what it carries -- is 
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -31,6 +32,7 @@ from chaudron.domain.email_ports import (
     validate_recipient,
 )
 from chaudron.infra.email import SmtpMailer, SmtpSettings, build_mailer
+from chaudron.services.account_email import RESET_TOKEN_QUERY_PARAM, reset_link
 
 _SECRET_KEY: Final = "test-secret-key-that-is-long-enough-for-validation"
 _ENCRYPTION_KEY: Final = base64.b64encode(b"0" * 32).decode()
@@ -92,6 +94,58 @@ def test_credentials_on_a_clear_connection_are_refused() -> None:
             smtp_username="chaudron",
             smtp_password=SecretStr("hunter2hunter2"),
         )
+
+
+def test_a_username_without_a_password_is_refused_at_startup() -> None:
+    """The quiet middle, made loud.
+
+    Left alone, this configuration starts, advertises password reset as
+    available, answers ``202``, skips ``login()`` because
+    ``infra/email/smtp.py`` gates it on both credentials, and has the relay
+    reject the message on a worker thread long after the response. The operator
+    sees one warning naming an exception class. Every reset mail is dropped while
+    the interface says it was sent.
+
+    It was easy to reach: ``.env.example`` tells the operator to put the password
+    in the podman secret ``chaudron-smtp-password``, and no quadlet mounted it.
+    """
+    with pytest.raises(ValidationError, match="CHAUDRON_SMTP_PASSWORD is empty"):
+        _settings(
+            smtp_host="relay.example.test",
+            smtp_from="chaudron@example.test",
+            smtp_username="chaudron",
+        )
+
+
+def test_a_blank_password_is_refused_exactly_as_an_absent_one() -> None:
+    """The shape the deployment actually produces.
+
+    An unmounted secret leaves ``CHAUDRON_SMTP_PASSWORD=`` in the environment
+    file, and ``_drop_blank_values`` turns that into ``None`` before any
+    validator runs -- so the refusal has to catch ``None``, which is what makes
+    this case and the one above the same case.
+    """
+    with pytest.raises(ValidationError, match="CHAUDRON_SMTP_PASSWORD is empty"):
+        _settings(
+            smtp_host="relay.example.test",
+            smtp_from="chaudron@example.test",
+            smtp_username="chaudron",
+            smtp_password="   ",
+        )
+
+
+def test_an_anonymous_relay_needs_no_password() -> None:
+    """The refusal is about the *combination*, not about requiring a password.
+
+    A relay with neither credential is a normal self-hosted arrangement -- a
+    local submission service that authenticates by network position -- and must
+    keep working.
+    """
+    settings = _settings(smtp_host="relay.example.test", smtp_from="chaudron@example.test")
+
+    assert settings.email_enabled is True
+    assert settings.smtp_username is None
+    assert build_mailer(settings) is not None
 
 
 def test_credentials_on_a_clear_loopback_connection_are_allowed() -> None:
@@ -207,3 +261,49 @@ def test_a_composed_message_has_exactly_one_recipient_and_no_html() -> None:
     assert envelope.get_content_type() == "text/plain"
     assert not envelope.is_multipart(), "no HTML alternative, and therefore no renderer"
     assert "Corps" in envelope.get_content()
+
+
+def test_a_reset_link_keeps_the_path_the_interface_is_served_under() -> None:
+    """`CHAUDRON_PUBLIC_APP_URL` may carry a path, and the link must not eat it.
+
+    The deployment this repository ships serves the application under ``/app/``
+    and a static landing page at the root. That page carries no bundle -- it is
+    deliberately free of JavaScript so that it renders even when the application
+    build is broken -- so a reset link pointing at the root opens a document that
+    cannot read the token, and the only account-recovery path there is does
+    nothing at all. Silently: the user sees a marketing page and assumes they
+    misread the mail.
+
+    Nothing asserted this until the link was already wrong in the documented
+    deployment. `reset_link` never mishandled the path; what failed is that no
+    test said the path was load-bearing, so the value it depends on stayed
+    described as an optional override in `.env.example`.
+    """
+    link = reset_link("https://chaudron.example.test/app", "a" * 64)
+
+    assert link.startswith("https://chaudron.example.test/app/?"), link
+    assert f"{RESET_TOKEN_QUERY_PARAM}={'a' * 64}" in link
+
+
+def test_the_shipped_reverse_proxy_redacts_the_reset_token_from_its_access_log() -> None:
+    """The parameter carrying a live credential must be dropped by name.
+
+    A cross-file assertion, and worth the awkwardness. `ops/Caddyfile.example`
+    filters `gtin`, `barcode`, `code` and `token` out of the logged query string
+    -- a list written when `token` was the only credential that travelled that
+    way. The reset flow arrived afterwards under a *different* name, and nobody
+    re-read the list: every click on a reset link wrote a working token into
+    journald, where the retention is thirty days against the token's one hour.
+
+    Keyed on :data:`RESET_TOKEN_QUERY_PARAM` rather than on the literal, so
+    renaming the parameter fails here instead of quietly un-redacting it. That is
+    the whole point: the defect was not a wrong filter, it was a filter and a
+    parameter name that nothing held together.
+    """
+    caddyfile = Path(__file__).resolve().parents[3] / "ops" / "Caddyfile.example"
+    text = caddyfile.read_text(encoding="utf-8")
+
+    assert f"delete {RESET_TOKEN_QUERY_PARAM}" in text, (
+        f"ops/Caddyfile.example does not drop {RESET_TOKEN_QUERY_PARAM!r} from its "
+        "access log, so a live password-reset token is written to disk on every click"
+    )

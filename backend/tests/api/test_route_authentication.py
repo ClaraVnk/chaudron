@@ -128,6 +128,27 @@ TOKEN_FORBIDDEN: Final[dict[str, str]] = {
         "deletes it. Neither is an operation a credential left in an appliance "
         "performs"
     ),
+    "/v1/account": (
+        "erases the account itself, and with it every credential it ever issued -- "
+        "including the token making the request. A machine token deleting the "
+        "identity that minted it is the one revocation that cannot be undone"
+    ),
+}
+
+#: ``/v1`` routes that deliberately resolve **no** household, with the reason.
+#:
+#: The rule below is that a ``/v1`` route pins its tenant, because one that does
+#: not runs with every row-level security policy showing it nothing -- failing
+#: safe, silently and confusingly. These are the routes for which there is no
+#: tenant to pin, and the entry is the deliberate gesture: a route landing here by
+#: accident fails the test rather than joining a prefix that was already excused.
+TENANT_FREE_PATHS: Final[dict[str, str]] = {
+    "/v1/account": (
+        "an account belongs to no household -- that is why user_account has no "
+        "tenant column and sits outside row-level security -- and a person erasing "
+        "their identity may hold several households or none. Requiring an "
+        "X-Household-Id here would be asking which household an account is in"
+    ),
 }
 
 #: Paths that answer without any authentication, each with the reason it must.
@@ -359,13 +380,15 @@ def test_every_v1_route_resolves_a_household_or_is_an_auth_route() -> None:
     nothing (migration ``0004``). That fails safe, but silently and confusingly.
     The ``/v1/auth`` routes are the deliberate exception: they are *about* the
     account, not about a household, and one of them is what a user with no
-    household at all calls to find that out.
+    household at all calls to find that out. :data:`TENANT_FREE_PATHS` names the
+    others one at a time, with the reason, rather than excusing a prefix.
     """
     offenders = [
         endpoint.label
         for endpoint in _ENDPOINTS
         if endpoint.path.startswith("/v1/")
         and not endpoint.path.startswith("/v1/auth/")
+        and endpoint.path not in TENANT_FREE_PATHS
         and (
             endpoint.route is None
             or get_household_id not in {d.call for d in _dependencies(endpoint.route.dependant)}
@@ -375,6 +398,13 @@ def test_every_v1_route_resolves_a_household_or_is_an_auth_route() -> None:
         f"these /v1 routes never resolve a household, so they run outside row-level "
         f"security: {offenders}"
     )
+
+
+def test_the_tenant_free_list_has_no_stale_entries() -> None:
+    """Same guard as the public list's: an excuse for a route that is gone is noise."""
+    declared = {endpoint.path for endpoint in _ENDPOINTS}
+    stale = sorted(path for path in TENANT_FREE_PATHS if path not in declared)
+    assert not stale, f"TENANT_FREE_PATHS names routes that do not exist any more: {stale}"
 
 
 # --------------------------------------------------------------------------- #
@@ -619,7 +649,17 @@ ROLE_GUARDED: Final[dict[str, str]] = {
 #: row on every call. An exemption argued from a claim about the code is only ever
 #: as good as the claim, so anything added here has to be checked against the
 #: service, not against the verb.
-UNGUARDED_WRITES: Final[dict[str, str]] = {}
+UNGUARDED_WRITES: Final[dict[str, str]] = {
+    "DELETE /v1/account": (
+        "the one write under /v1 whose subject is not a household. A role is a "
+        "property of a *membership*, and this route erases the account that holds "
+        "them -- so there is no membership to read a role from, and no role that "
+        "would mean anything: an owner has no authority over somebody else's "
+        "identity, and a viewer needs none over their own. The subject is the "
+        "session's own account, never an identifier in the path or a body, which "
+        "is the guard a role would otherwise have been standing in for"
+    )
+}
 
 #: The methods that change something. ``POST`` is here despite being the verb of
 #: every non-idempotent read as well, which is what makes

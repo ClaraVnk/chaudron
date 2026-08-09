@@ -26,6 +26,8 @@ dedicated unprivileged user.
 | `chaudron-restore-check.{service,timer}` | Runs the restore drill weekly — **on the backup host**, see §8.6 |
 | `chaudron-purge-credentials.container` | One-shot sweep of dead sessions and machine tokens |
 | `chaudron-purge-credentials.timer` | Runs the sweep weekly — see §2.8 |
+| `chaudron-purge-retained-data.container` | One-shot sweep of rate-limit buckets and stock snapshots |
+| `chaudron-purge-retained-data.timer` | Runs that sweep daily — see §2.9 |
 | `journald.conf.d/chaudron-retention.conf` | Journal retention — 30 days, capped |
 
 `podman-auto-update.timer.d/override.conf` **was removed**. It made the
@@ -164,11 +166,37 @@ Check both endpoints — they are deliberately separate:
 
 ```sh
 curl -fsS http://127.0.0.1:8000/healthz   # liveness: process is up, no dependency check
-curl -fsS http://127.0.0.1:8000/readyz    # readiness: database reachable, migrations applied
+curl -fsS http://127.0.0.1:8000/readyz    # readiness: database, row-level security, migrations
 ```
 
+`/readyz` answers a `checks` object, and each key can refuse on its own:
+
+| key | `200` when | refuses with |
+|---|---|---|
+| `database` | reachable | `unavailable` |
+| `row_level_security` | `enforced` — or `bypassed` in `local` and `ci` only, which connect as the table owner on purpose (§6) | `bypassed` anywhere else |
+| `migrations` | `ok`, or `ahead` | `outdated`, `unknown` |
+
+The migration check was added after an audit found this line claiming
+"migrations applied" while the endpoint checked nothing of the sort. The four
+values are not decoration:
+
+- **`ok`** — the schema is stamped at exactly the revision this image needs.
+- **`ahead`** — the database carries a later revision than the running image
+  knows. This is *ready*, deliberately: it is the few-minute window of §5.4,
+  where the migration has been applied and the API has not yet been replaced,
+  and every migration is required to be backward compatible for exactly that
+  window. Refusing here would take a healthy instance out of service in the
+  middle of the documented procedure.
+- **`outdated`** — new code against an older schema. You deployed the image and
+  did not run `chaudron-migrate`. Run it (§5.4).
+- **`unknown`** — no `alembic_version` table, no row in it, or several. Usually a
+  database that has never been migrated at all. Same fix, different starting
+  point — and it is kept as its own word precisely so you can tell the two apart.
+
 A failing `/readyz` with a passing `/healthz` means the process is alive but a
-dependency is down — do not restart the container, fix the dependency.
+dependency is down or the schema is wrong — do not restart the container, fix
+what it names.
 
 ### 1.7 Tear down
 
@@ -253,8 +281,11 @@ until the value crosses an HTTP header or an HTML form and silently fails.
 Nothing here is ever passed as a command-line argument: arguments are visible in
 `ps` to every user on the machine and land in shell history.
 
-**Every secret below is required.** A `Secret=` line in a quadlet is a hard
-dependency — a missing one is a start-up failure, not a warning. Two of these
+**Every secret below is required, except the two marked optional** — the SMTP
+relay password and the provider keys, whose `Secret=` lines ship commented out
+for that reason. A `Secret=` line in a quadlet is a hard dependency — a missing
+one is a start-up failure, not a warning, which is exactly why an optional secret
+has to arrive with its quadlet line commented rather than live. Two of these
 (`chaudron-credential-encryption-key` and the database DSNs) used to be declared
 by the quadlets and created by nothing, so following this section end to end
 produced a service that would not start. An operator stuck at that point
@@ -301,6 +332,33 @@ read -rs -p 'Inbound email webhook key: ' V && printf '%s' "$V" | podman secret 
 read -rs -p 'Anthropic API key: ' V && printf '%s' "$V" | podman secret create chaudron-anthropic-api-key - && unset V
 ```
 
+**Outbound relay password — only if your relay authenticates.** Outbound mail is
+optional (leave `CHAUDRON_SMTP_HOST` empty and there is none), and a relay that
+authenticates by network position needs no password. Create this one **if and
+only if** you set `CHAUDRON_SMTP_USERNAME`, and uncomment the matching
+`Secret=chaudron-smtp-password` line in `chaudron.container` when you do — it
+ships commented out, because a `Secret=` naming a secret that does not exist is a
+start-up failure.
+
+```sh
+read -rs -p 'SMTP relay password: ' V && printf '%s' "$V" | podman secret create chaudron-smtp-password - && unset V
+```
+
+`.env.example` asked for this secret long before any unit mounted it, which is
+the state an audit found, and it left an operator two bad ways out. Put the
+password in `chaudron.env` and it works — but it is then in the plain file in
+`$HOME` that §2.4 spends a paragraph keeping secrets out of. Follow the
+instruction literally instead — create the secret, leave the variable blank —
+and you got the worse outcome, because it looked like it worked:
+`CHAUDRON_SMTP_PASSWORD` arrived empty, an empty value is dropped to "unset"
+before any validation runs, `SMTP AUTH` was skipped, and the relay rejected the
+message on a background thread *after* the request had already been answered
+`202`. Every reset mail disappeared while the interface reported it sent.
+
+Both halves are closed now: the quadlet has the line, and a username with no
+password is refused at startup. The failure is a container that will not start
+and says why.
+
 Check the set against what the quadlets declare — the comparison that catches a
 typo before a failed start does:
 
@@ -308,6 +366,11 @@ typo before a failed start does:
 diff <(podman secret ls --format '{{.Name}}' | sort) \
      <(grep -ho '^Secret=[^,]*' ops/*.container | cut -d= -f2 | sort -u)
 ```
+
+Commented-out `Secret=` lines are absent from the right-hand side, so anything
+you created but have not enabled shows up as an extra on the left. That is
+expected for the optional ones — the SMTP password and the provider keys you do
+not use — and it is worth reading rather than skipping past.
 
 ### 2.4 Non-secret configuration
 
@@ -322,6 +385,24 @@ install -m 0600 /dev/null ~chaudron/chaudron.env
 directory tree as the backups; a leaked backup that also carried this file would
 hand over the key that decrypts everything. That is the whole reason the values
 in §2.3 are Podman secrets and not lines here.
+
+**`CHAUDRON_PUBLIC_APP_URL` must be set, and it must end in `/app`.**
+
+```sh
+CHAUDRON_PUBLIC_APP_URL=https://chaudron.example.tld/app
+```
+
+This is the base the password-reset link is built from. In this deployment the
+interface is served under `/app/` and the site **root** is the static landing
+page, which ships no JavaScript at all — so a link pointing at the root opens a
+page that cannot read the token out of the query string and cannot do anything
+with it. The reset then fails silently, and it fails for the one person least
+able to report it usefully: somebody already locked out of their account.
+
+Leaving it empty falls back to `CHAUDRON_BASE_URL`, which is the site root. That
+fallback is right for a deployment that serves the application at the root and
+wrong for this one, which is why the value is named here rather than left to the
+default.
 
 #### 2.4.1 Verify the image — required, before it runs for the first time
 
@@ -553,6 +634,71 @@ machine token with no expiry at all is never swept however old it is: an
 appliance polling on a credential issued years ago is the documented use, and
 "old" is not "dead". `backend/tests/test_credential_purge.py` asserts each of
 those negatives before it asserts that anything is deleted.
+
+### 2.9 Sweep data held past its retention — daily
+
+A second sweep, and a second timer, because the two have different clocks. §2.8
+removes rows thirty days after they stop authenticating anybody; weekly is
+generous for that. This one bounds how long **personal data with no cascade to
+reach it** sits in the database, and the useful life of what it removes is
+measured in hours.
+
+Two things, both of which had no retention at all until this timer existed.
+
+**`rate_limit_bucket` holds e-mail addresses.** Its `bucket_key` is "a household
+id, a client address, or a normalised e-mail", and the e-mail rows include
+addresses of people who never had an account here — every address typed into the
+sign-in form, every address a stranger requested a reset link for. The table
+carries no `household_id` by design (migration `0018`), so nothing cascades into
+it and no household erasure reaches it. `DELETE /v1/account` deletes the rows
+belonging to the account being erased; this is what bounds every other row.
+
+**`recipe_suggestion.stock_snapshot` is a household's whole cupboard**, frozen in
+JSONB, and it was sent to a model provider. `docs/security-model.md` §8.2 says it
+must carry "the shortest retention period in the system"; it carried none,
+because the column was `NOT NULL` until migration `0027` made it clearable.
+
+Look before you write. A first run should be a count:
+
+```sh
+podman run --rm --network chaudron-net \
+  --env-file ~/chaudron/chaudron.env \
+  --secret chaudron-database-url-owner,type=env,target=CHAUDRON_DATABASE_URL \
+  ghcr.io/claravnk/chaudron:latest \
+  python /app/scripts/purge_retained_data.py --dry-run
+```
+
+Then install and enable the timer:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now chaudron-purge-retained-data.timer
+systemctl --user list-timers chaudron-purge-retained-data.timer
+```
+
+**It takes the owner's DSN**, for the same reason §2.8 does and a different
+table: `recipe_suggestion` is under row-level security keyed on a
+transaction-local tenant, and a retention sweep is not scoped to one household.
+The application role would post no tenant, match no rows, clear nothing, and exit
+`0`.
+
+**Thirty days on the snapshot is a proposal, not a decision.** It is the number
+`docs/security-model.md` §8.4 already proposes, and that table says of itself
+that it holds "proposals to be arbitrated, not decisions". `--snapshot-days` is
+where you arbitrate it. What is not arbitrable is "for ever", which is what the
+column had. Shortening it costs the "why did it suggest that?" explanation on
+older suggestions and costs nothing else; the suggestion, its steps and its
+rating are untouched either way.
+
+**Twenty-four hours on the buckets is a cadence question, not a retention one.**
+Every bucket is arithmetically dead one hour after its last use — that is the
+widest limiter window — so what decides whether the address is gone in a day or
+in a week is how often this runs, not the flag. Daily bounds it at about
+twenty-five hours; `OnCalendar=hourly` bounds it at about two, at the cost of
+twenty-four journal entries a day. Anything **below** an hour is refused by the
+script rather than rounded up: deleting a bucket that has not refilled is a
+refund, and a refund on the sign-in limiter is a password spray with the limit
+taken off.
 
 ---
 
@@ -1098,6 +1244,37 @@ Because both versions coexist for a few minutes, **every migration must be
 backward compatible with the code currently running**. Expand, migrate, contract:
 add columns in one release, remove them in a later one, never both at once.
 
+#### If you forget to run the migration
+
+Nothing above forces the order. A release that carries a migration is deployed by
+the same 15-minute timer as one that does not, so an operator who does not read
+the release notes gets the new image on the old schema, and finds out from
+whichever request first touches a column that is not there.
+
+`/readyz` now says so directly — `"migrations": "outdated"`, and `503` (§1.6).
+That is a real improvement on the previous behaviour, which was `200 ready`. Be
+clear about what it does **not** yet do:
+
+- **Caddy does not poll it.** `Caddyfile.example` routes `/readyz` to the API but
+  declares no `health_uri`, so the proxy forwards traffic to an instance that is
+  refusing readiness. Adding `health_uri /readyz` to its `reverse_proxy` block is
+  what would make the refusal take the instance out of service.
+- **The update gate does not poll it either.** `verified-auto-update.sh` waits
+  for the *container* to report `healthy`, and that health command is `/healthz`
+  — liveness, which deliberately does not touch PostgreSQL. So the deploy still
+  reports success. Waiting on `/readyz` as well, after the health wait, is what
+  would make it fail.
+
+Neither is wired up here, deliberately: both change how traffic is routed and how
+a deploy is judged, and neither has been exercised on this host. Until they are,
+**`/readyz` is a thing you check, not a thing that protects you** — so check it
+after every release that carried a migration:
+
+```sh
+podman run --rm --network chaudron-net docker.io/library/caddy:2-alpine \
+  wget -qO- http://chaudron:8000/readyz
+```
+
 ### 5.5 What this cadence costs
 
 - 96 registry polls per day per image. GHCR absorbs that without complaint.
@@ -1478,6 +1655,19 @@ VITE_SITE_URL=https://chaudron.example.tld \
   npm --prefix frontend ci && npm --prefix frontend run build
 rsync -a --delete frontend/dist/ ~chaudron/chaudron/www/
 ```
+
+**Both `VITE_*` values are baked into the bundle at build time.** Vite substitutes
+them textually; nothing reads them at runtime, and there is no environment
+variable on the server that can change them afterwards. Two consequences worth
+stating once:
+
+- **Changing the domain means rebuilding and re-publishing the PWA.** Restarting
+  the proxy, or editing `caddy.env`, will not do it — the old origin stays
+  compiled into `dist/`, and every API call from the new domain goes to the old
+  one.
+- **The value must be the site's own origin**, not a second hostname pointed at
+  the same machine. Same origin for the site and the API is what keeps CORS out
+  of the picture entirely, which is why `CHAUDRON_CORS_ORIGINS` stays empty.
 
 ```sh
 # 3. Start

@@ -74,6 +74,8 @@ async def snapshot_items(session: AsyncSession, household: Household) -> list[di
         )
     ).first()
     assert row is not None
+    # NOT NULL until revision 0027; nullable now so the retention job can clear it.
+    assert row.stock_snapshot is not None
     items: list[dict[str, Any]] = row.stock_snapshot["items"]
     return items
 

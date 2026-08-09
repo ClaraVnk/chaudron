@@ -119,7 +119,7 @@ from chaudron.infra.documents import extract_pdf_text_isolated, sniff_image
 from chaudron.infra.untrusted_text import sanitize, sanitize_optional
 from chaudron.services.budget import resolve_zone
 from chaudron.services.inventory import AddItemCommand, InventoryService
-from chaudron.services.providers import ProviderService
+from chaudron.services.providers import NO_PROVIDER_FOR_RECEIPTS, ProviderService
 from chaudron.services.receipt_text import (
     MAX_RAW_LABEL,
     looks_like_receipt_text,
@@ -345,16 +345,15 @@ class ReceiptImportService:
                 remedy=error.remedy,
             ) from None
         except ProviderNotConfigured:
+            # `NO_PROVIDER_FOR_RECEIPTS` rather than the same two sentences typed
+            # again. They *were* typed again here, and the copies had already
+            # drifted: the constant is the one `services/providers.py` maintains
+            # and the one whose remedy names the screen that actually hosts the
+            # form, so a household reading this and a household reading the
+            # banner are now sent to the same place.
             raise ReceiptImportUnavailableError(
-                reason=(
-                    "Aucun fournisseur de modèle utilisable n'est configuré pour ce "
-                    "foyer : la photo d'un ticket ne peut pas être lue."
-                ),
-                remedy=(
-                    "Enregistrez un fournisseur multimodal dans la configuration du "
-                    "foyer, ou importez le PDF de votre commande drive, qui se lit "
-                    "sans modèle."
-                ),
+                reason=NO_PROVIDER_FOR_RECEIPTS.reason,
+                remedy=NO_PROVIDER_FOR_RECEIPTS.remedy,
             ) from None
 
         parsed = await active.parser.parse(data, media_type)

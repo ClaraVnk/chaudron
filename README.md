@@ -367,10 +367,14 @@ cd ../frontend && cp .env.example .env.local   # one value: the API base URL
 npm install && npm run dev
 ```
 
-Then open the app and **create an account**. Registering also creates your first
-household, signs you in, and sets a `__Host-`-prefixed session cookie; the API
-answers `401` until it is there, and every unsafe request also has to echo the
-CSRF token the session hands back.
+Then open the app and **create an account**, then **sign in** — two steps, not
+one. Registering answers `202` and creates your first household, but it
+deliberately does *not* sign you in: a session issued on registration would be
+issued on only one of the two branches, and "did this address already have an
+account?" is then answerable from the status code. That oracle is closed, and the
+price is the extra sign-in. Signing in is what sets the `__Host-`-prefixed
+session cookie; the API answers `401` until it is there, and every unsafe request
+also has to echo the CSRF token the session hands back.
 
 The first screen you land on asks you to **create a storage location**, because
 you have none. That is deliberate rather than an omission: nothing is seeded at
@@ -384,7 +388,11 @@ sign-in it created. It refuses to run in any other environment, because the
 password is written in the source of a public repository.
 
 Liveness and readiness are separate endpoints on purpose: `/healthz` says the
-process is alive, `/readyz` says it can actually serve traffic.
+process is alive, `/readyz` says it can actually serve traffic — the database
+answers, row-level security is really in force, and the schema is one this build
+was written against. That last check exists because the runbook had claimed it
+for a year while the endpoint answered `200 ready` to a database several
+migrations behind the code.
 
 Row-level security ships enabled, but it only *enforces* once the application
 connects as a non-owning role — the table owner bypasses it, and nothing warns
