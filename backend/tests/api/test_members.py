@@ -60,6 +60,7 @@ async def test_a_member_is_created_listed_and_read_back_whole(
         "diet",
         "allergens",
         "avoided_ingredients",
+        "avoided_ingredients_strict",
         "free_text_restrictions",
         "infant_texture",
     }

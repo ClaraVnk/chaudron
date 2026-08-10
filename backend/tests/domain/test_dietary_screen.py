@@ -54,6 +54,10 @@ def facts(
     state: AllergenDataState = AllergenDataState.DECLARED,
     risk: frozenset[Allergen] = frozenset(),
     avoided_risk: frozenset[AvoidedIngredient] = frozenset(),
+    # What the list positively names, read in the non-strict mode. Defaulted
+    # to the risk set so a factory call that says nothing keeps the old
+    # meaning: for a declared product the two are equal by construction.
+    avoided_named: frozenset[AvoidedIngredient] | None = None,
     markers: frozenset[PnnsMarker] = frozenset(),
     categories: tuple[str, ...] = (),
 ) -> ProductFacts:
@@ -63,6 +67,7 @@ def facts(
         allergen_state=state,
         allergens_risk=risk,
         avoided_ingredients_risk=avoided_risk,
+        avoided_ingredients_named=avoided_risk if avoided_named is None else avoided_named,
         pnns_markers=markers,
         category_tags=categories,
     )

@@ -83,6 +83,7 @@ def _to_draft(payload: MemberIn) -> MemberDraft:
         diet=payload.diet,
         allergens=tuple(payload.allergens),
         avoided_ingredients=tuple(payload.avoided_ingredients),
+        avoided_ingredients_strict=payload.avoided_ingredients_strict,
         infant_texture=payload.infant_texture,
         free_text_restrictions=payload.free_text_restrictions.strip() or None,
     )
@@ -115,6 +116,12 @@ def _to_patch(payload: MemberPatchIn) -> MemberPatch:
             if "allergens" in sent and payload.allergens is not None
             else UNSET
         ),
+        avoided_ingredients_strict=(
+            payload.avoided_ingredients_strict
+            if "avoided_ingredients_strict" in sent
+            and payload.avoided_ingredients_strict is not None
+            else UNSET
+        ),
         avoided_ingredients=(
             tuple(payload.avoided_ingredients)
             if "avoided_ingredients" in sent and payload.avoided_ingredients is not None
@@ -139,6 +146,7 @@ def _to_out(person: Person) -> MemberOut:
         allergens=sorted(person.allergens),
         # Same, over a vocabulary whose order is this application's own.
         avoided_ingredients=sorted(person.avoided_ingredients),
+        avoided_ingredients_strict=person.avoided_ingredients_strict,
         free_text_restrictions=person.free_text_restrictions or "",
         infant_texture=person.infant_texture,
     )

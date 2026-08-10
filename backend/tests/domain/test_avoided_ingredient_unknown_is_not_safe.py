@@ -182,6 +182,9 @@ def _facts(
     *,
     avoided_risk: frozenset[AvoidedIngredient],
     name: str = "Produit",
+    # What the list positively names. Defaults to the risk set: for a declared
+    # product the two are equal, which is what every caller here means.
+    avoided_named: frozenset[AvoidedIngredient] | None = None,
 ) -> ProductFacts:
     return ProductFacts(
         product_id=uuid.uuid7(),
@@ -189,6 +192,7 @@ def _facts(
         allergen_state=AllergenDataState.DECLARED,
         allergens_risk=frozenset(),
         avoided_ingredients_risk=avoided_risk,
+        avoided_ingredients_named=avoided_risk if avoided_named is None else avoided_named,
         pnns_markers=frozenset(),
         category_tags=(),
     )
@@ -246,6 +250,9 @@ def test_an_allergen_outranks_an_avoided_ingredient_in_the_reported_reason() -> 
         allergen_state=AllergenDataState.UNKNOWN,
         allergens_risk=frozenset(Allergen),
         avoided_ingredients_risk=frozenset(AvoidedIngredient),
+        # Unknown names nothing: the risk set is maximal precisely because
+        # the list said nothing, so the named set must be empty.
+        avoided_ingredients_named=frozenset(),
         pnns_markers=frozenset(),
         category_tags=(),
     )

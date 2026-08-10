@@ -124,6 +124,7 @@ def downgrade() -> None:
     # did (revisions 0013 and 0016 carry the same note; 0010 is the clean-up of
     # the eighteen constraints that were deployed without it).
     op.drop_constraint("avoided_ingredients_wellformed", "household_person", type_="check")
+    op.drop_column("household_person", "avoided_ingredients_strict")
     op.drop_column("household_person", "avoided_ingredients")
 
     op.drop_index("ix_product_avoided_ingredients_risk", table_name="product")
@@ -244,4 +245,34 @@ def _extend_household_person() -> None:
         "household_person",
         "array_position(avoided_ingredients, NULL) IS NULL"
         f" AND cardinality(avoided_ingredients) <= {len(AvoidedIngredient)}",
+    )
+
+    # Which reading of "unknown" this person asked for, and it is a column
+    # rather than a constant because the measurement made the constant
+    # untenable. On 1 263 864 French products, 13.2% carry an ingredient list
+    # this parser can read and 72% of packaged products carry none at all — so
+    # the allergen doctrine, applied here, withholds 86.8% of the catalogue.
+    #
+    # That is the right answer for somebody whose child reacts to kiwi and the
+    # wrong one for somebody who dislikes it, and no default can tell them
+    # apart. `false` is the one that fails visibly: a household that wanted
+    # protection and sees an unfiltered product says so, whereas a household
+    # that wanted a preference and loses nine products in ten concludes the
+    # application is broken and stops using the feature — which protects nobody.
+    op.add_column(
+        "household_person",
+        sa.Column(
+            "avoided_ingredients_strict",
+            sa.Boolean(),
+            server_default=sa.text("false"),
+            nullable=False,
+            comment=(
+                "Whether an unreadable ingredient list counts as 'might contain it' for "
+                "this person. True is the doctrine the regulated allergens use and "
+                "withholds ~87% of the French catalogue, measured; false withholds only "
+                "what an ingredient list positively names and reports the rest as "
+                "undocumented. Medical rather than cosmetic, so it is asked and never "
+                "inferred."
+            ),
+        ),
     )

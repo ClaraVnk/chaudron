@@ -1098,6 +1098,29 @@ class HouseholdPerson(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
     #: Deferred like ``allergens``: "no onion" is a preference, "no onion"
     #: written by somebody with a FODMAP diagnosis is health data, and this table
     #: cannot tell them apart -- so it treats both as the latter.
+    #: Whether this person's avoided ingredients use the allergen doctrine —
+    #: an unreadable ingredient list counts as "might contain it".
+    #:
+    #: Measured on 1 263 864 French products before this column existed: 13.2%
+    #: carry a list this parser can read, and 72% of packaged products carry
+    #: none at all. Strict therefore withholds 86.8% of the catalogue, which is
+    #: right for a diagnosis and indistinguishable from a broken inventory for a
+    #: dislike. `false` by default because the *safe* default here is the one
+    #: that keeps working: somebody who ticks kiwi out of distaste and loses
+    #: nine products in ten unticks it and gets no protection at all, whereas
+    #: somebody with a diagnosis is asked, in as many words, on the same screen.
+    avoided_ingredients_strict: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        comment=(
+            "Whether an unreadable ingredient list counts as 'might contain it' for "
+            "this person. True is the doctrine the regulated allergens use and "
+            "withholds ~87% of the French catalogue, measured; false withholds only "
+            "what an ingredient list positively names and reports the rest as "
+            "undocumented. Medical rather than cosmetic, so it is asked and never "
+            "inferred."
+        ),
+    )
     avoided_ingredients: Mapped[list[AvoidedIngredient]] = mapped_column(
         ARRAY(pg_enum(AvoidedIngredient, "avoided_ingredient")),
         deferred=True,

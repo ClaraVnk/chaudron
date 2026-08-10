@@ -397,6 +397,7 @@ export interface HouseholdMember {
   allergens: AllergenCode[];
   /** Best-effort exclusions. A filter, but never a guarantee — see the constant above. */
   avoided_ingredients: AvoidedIngredientCode[];
+  avoided_ingredients_strict: boolean;
   free_text_restrictions: string;
   /** Non-null if and only if `age_band` is an infant band — the server 422s otherwise. */
   infant_texture: InfantTexture | null;

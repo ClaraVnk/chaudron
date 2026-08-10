@@ -411,6 +411,11 @@ class MemberOut(BaseModel):
     #: has to be able to render the two lists with different wording, and it can
     #: only do that if the wire keeps them apart.
     avoided_ingredients: list[AvoidedIngredient]
+    #: Which reading of an unreadable ingredient list this person asked for.
+    #: Returned so the screen can say which one is in force — the two differ by
+    #: 86.8% of the French catalogue, measured, and a filter whose strength is
+    #: invisible is a filter nobody can trust.
+    avoided_ingredients_strict: bool
     #: ``""`` rather than ``null`` when unset: the field is a text input on the
     #: other side, and a client that has to handle both writes one of them wrong.
     free_text_restrictions: str
@@ -445,6 +450,7 @@ class MemberIn(StrictModel):
         list[AvoidedIngredient],
         Field(default_factory=list, max_length=MAX_AVOIDED_INGREDIENTS),
     ]
+    avoided_ingredients_strict: bool = False
     free_text_restrictions: Annotated[str, Field(default="", max_length=MAX_FREE_TEXT)]
     infant_texture: InfantTexture | None = None
 
@@ -465,6 +471,7 @@ class MemberPatchIn(StrictModel):
         list[AvoidedIngredient] | None,
         Field(default=None, max_length=MAX_AVOIDED_INGREDIENTS),
     ]
+    avoided_ingredients_strict: bool | None = None
     free_text_restrictions: Annotated[str | None, Field(default=None, max_length=MAX_FREE_TEXT)]
     infant_texture: InfantTexture | None = None
 

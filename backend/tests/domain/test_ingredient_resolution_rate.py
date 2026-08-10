@@ -147,6 +147,7 @@ def _index() -> StockIndex:
                 allergen_state=AllergenDataState.DECLARED,
                 allergens_risk=frozenset(),
                 avoided_ingredients_risk=frozenset(),
+                avoided_ingredients_named=frozenset(),
                 pnns_markers=frozenset(),
                 category_tags=(),
             ),

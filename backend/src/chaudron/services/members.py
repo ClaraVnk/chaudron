@@ -56,6 +56,7 @@ class MemberDraft:
     diet: Diet
     allergens: tuple[Allergen, ...]
     avoided_ingredients: tuple[AvoidedIngredient, ...]
+    avoided_ingredients_strict: bool
     infant_texture: InfantTexture | None
     free_text_restrictions: str | None
 
@@ -69,6 +70,7 @@ class MemberPatch:
     diet: Maybe[Diet] = UNSET
     allergens: Maybe[tuple[Allergen, ...]] = UNSET
     avoided_ingredients: Maybe[tuple[AvoidedIngredient, ...]] = UNSET
+    avoided_ingredients_strict: Maybe[bool] = UNSET
     infant_texture: Maybe[InfantTexture | None] = UNSET
     free_text_restrictions: Maybe[str | None] = UNSET
 
@@ -85,6 +87,7 @@ class MemberService:
                 .options(
                     undefer(HouseholdPerson.allergens),
                     undefer(HouseholdPerson.avoided_ingredients),
+                    undefer(HouseholdPerson.avoided_ingredients_strict),
                     undefer(HouseholdPerson.free_text_restrictions),
                 )
                 .order_by(HouseholdPerson.sort_order, HouseholdPerson.display_name)
@@ -101,6 +104,7 @@ class MemberService:
             diet=draft.diet,
             allergens=list(dict.fromkeys(draft.allergens)),
             avoided_ingredients=list(dict.fromkeys(draft.avoided_ingredients)),
+            avoided_ingredients_strict=draft.avoided_ingredients_strict,
             infant_texture=draft.infant_texture,
             free_text_restrictions=draft.free_text_restrictions or None,
         )
@@ -126,6 +130,9 @@ class MemberService:
         person.allergens = list(dict.fromkeys(_or_keep(patch.allergens, tuple(person.allergens))))
         person.avoided_ingredients = list(
             dict.fromkeys(_or_keep(patch.avoided_ingredients, tuple(person.avoided_ingredients)))
+        )
+        person.avoided_ingredients_strict = _or_keep(
+            patch.avoided_ingredients_strict, person.avoided_ingredients_strict
         )
         person.free_text_restrictions = (
             _or_keep(patch.free_text_restrictions, person.free_text_restrictions) or None
@@ -188,6 +195,7 @@ def _to_person(row: HouseholdPerson) -> Person:
         diet=row.diet,
         allergens=frozenset(row.allergens),
         avoided_ingredients=frozenset(row.avoided_ingredients),
+        avoided_ingredients_strict=row.avoided_ingredients_strict,
         infant_texture=row.infant_texture,
         free_text_restrictions=row.free_text_restrictions,
     )

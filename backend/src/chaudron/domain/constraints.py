@@ -289,8 +289,25 @@ class Person:
     #: Both are applied by the same screen; only one of them rests on a
     #: declaration a manufacturer was obliged to make.
     avoided_ingredients: frozenset[AvoidedIngredient]
+    #: Whether an unreadable ingredient list counts as "might contain it".
+    #:
+    #: Measured before this existed: on 1 263 864 French products, only 13.2%
+    #: carry an ingredient list this parser can read. 72% of packaged products
+    #: have no list at all. Treating unknown as unsafe — the doctrine the
+    #: regulated allergens rightly use — therefore withholds **86.8%** of the
+    #: catalogue, which is not a filter but a switch that turns the inventory
+    #: off.
+    #:
+    #: So the household decides, per person, and the screen says which they
+    #: chose. `True` is the allergen doctrine and is right for a diagnosis;
+    #: `False` withholds only what is positively named and reports the rest as
+    #: undocumented, which is right for a dislike. Neither is a default that can
+    #: be inferred, because the difference is medical.
     infant_texture: InfantTexture | None
     free_text_restrictions: str | None
+    #: `False` is the database default and the ordinary case: somebody who
+    #: ticked an ingredient without being asked to choose a reading.
+    avoided_ingredients_strict: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +327,12 @@ class HouseholdConstraints:
     #: anything -- but on evidence that is weaker by a wide margin, which is why
     #: it is carried under its own name all the way to the screen.
     avoided_ingredients: frozenset[AvoidedIngredient]
+    #: True when **anybody at the table** asked for the strict reading. The
+    #: union takes the stricter of the two on purpose: a table seating one
+    #: person with a diagnosis and one with a dislike must be catered for the
+    #: diagnosis, and the cost of the other reading is a meal nobody wanted
+    #: rather than a meal somebody cannot have.
+    avoided_ingredients_strict: bool
     diet: Diet
     infant_texture: InfantTexture | None
     age_bands: frozenset[AgeBand]
@@ -339,9 +362,13 @@ def union_of(people: Iterable[Person]) -> HouseholdConstraints:
     texture = min(textures, key=lambda value: _TEXTURE_RANK[value], default=None)
     allergens: set[Allergen] = set()
     avoided: set[AvoidedIngredient] = set()
+    strict = False
     for person in members:
         allergens |= person.allergens
         avoided |= person.avoided_ingredients
+        # `any`, not `all`: a table seating a diagnosis and a dislike is
+        # catered for the diagnosis.
+        strict = strict or person.avoided_ingredients_strict
     preferences = tuple(
         text
         for text in ((person.free_text_restrictions or "").strip() for person in members)
@@ -351,6 +378,7 @@ def union_of(people: Iterable[Person]) -> HouseholdConstraints:
         members=members,
         excluded_allergens=frozenset(allergens),
         avoided_ingredients=frozenset(avoided),
+        avoided_ingredients_strict=strict,
         diet=diet,
         infant_texture=texture,
         age_bands=frozenset(person.age_band for person in members),
@@ -489,6 +517,11 @@ class ProductFacts:
     #: an empty set reads as "names none of them", which is precisely what a
     #: product with an unreadable ingredient list must never be taken to say.
     avoided_ingredients_risk: frozenset[AvoidedIngredient]
+    #: What the ingredient list *names*, as opposed to what it fails to rule
+    #: out. Empty for a product nobody documented — which is why it can only be
+    #: read together with a household that accepted that reading. See
+    #: `HouseholdConstraints.avoided_ingredients_strict`.
+    avoided_ingredients_named: frozenset[AvoidedIngredient]
     pnns_markers: frozenset[PnnsMarker]
     category_tags: tuple[str, ...]
 
@@ -555,11 +588,26 @@ def withhold_reason(
     if any(_rule_matches(rule, facts) for rule in rules):
         return WithholdReason.INFANT_RULE
     # Last, because it is the only one of the four whose failure costs a meal
-    # somebody did not want rather than a meal somebody cannot have. It is read
-    # off `avoided_ingredients_risk` and never off `avoided_ingredients_named`,
-    # so a product whose ingredient list could not be read is withheld here too
-    # -- the reason this test can be one line.
-    if constraints.avoided_ingredients & facts.avoided_ingredients_risk:
+    # somebody did not want rather than a meal somebody cannot have.
+    #
+    # WHICH SET IS READ IS THE HOUSEHOLD'S DECISION, and it is the only place in
+    # this function where that is true. `avoided_ingredients_risk` carries the
+    # allergen doctrine — an unreadable ingredient list counts as "might contain
+    # it" — and measured against the French catalogue that withholds 86.8% of
+    # products, because 72% of packaged ones carry no ingredient list at all.
+    # Correct for a diagnosis; useless for a dislike, and indistinguishable from
+    # a broken inventory.
+    #
+    # So a table where nobody asked for the strict reading is filtered on what
+    # the catalogue positively *names*, and everything it could not read is
+    # reported as undocumented rather than removed. See
+    # `HouseholdConstraints.avoided_ingredients_strict`.
+    avoided = (
+        facts.avoided_ingredients_risk
+        if constraints.avoided_ingredients_strict
+        else facts.avoided_ingredients_named
+    )
+    if constraints.avoided_ingredients & avoided:
         return WithholdReason.AVOIDED_INGREDIENT
     return None
 
