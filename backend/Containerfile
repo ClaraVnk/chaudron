@@ -11,6 +11,46 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — build: resolve and install dependencies into a self-contained venv.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# THE BUILD CONTEXT IS THE REPOSITORY ROOT, NOT `backend/`
+# ---------------------------------------------------------------------------
+# Every COPY below is therefore prefixed with `backend/` or `frontend/`. That
+# widening is not free -- it is what `.containerignore` at the root exists to
+# bound -- and it buys one thing: the interface ships inside this image.
+#
+# Before that, `frontend/dist` was a tarball each operator built themselves,
+# named by a path and pinned by a sha256 in their own inventory. It was the one
+# part of a Chaudron deployment that no signature covered and that no two
+# operators could produce identically. Carrying it here puts it under the same
+# cosign signature and the same digest pin as the API, so ONE image bump moves
+# both halves at once and neither can silently lag the other.
+#
+# The bundle names no site: the API address defaults to the page's own origin
+# (`frontend/src/api/config.ts`), and the site URL is left as a `__SITE_URL__`
+# marker for the deployment to substitute (`VITE_DEFER_SITE_URL`, and the
+# reasoning in `frontend/vite.config.ts`). That is what makes one image valid
+# for every instance rather than for the one it was built for.
+FROM docker.io/library/node:22.23.2-bookworm-slim AS frontend
+
+WORKDIR /app
+
+# Manifests first, so a source-only change reuses the install layer.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+
+# `/app` as the working directory is load-bearing rather than conventional --
+# `frontend/vite.config.ts` explains at length why any other path breaks the
+# landing page's inline-CSS proxy.
+#
+# No VITE_SITE_URL and no VITE_API_BASE_URL on purpose. Setting either here
+# would bake this build's identity into an artefact meant to be deployed
+# anywhere, which is the whole defect being removed.
+ENV VITE_DEFER_SITE_URL=1
+RUN npm run build
+
+
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -28,12 +68,12 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Dependency manifests first: this layer is cached until the lockfile changes.
-COPY pyproject.toml uv.lock ./
+COPY backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
 
 # Application source, then install the project itself into the same venv.
-COPY src ./src
+COPY backend/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable --no-dev
 
@@ -89,8 +129,8 @@ RUN rm -rf /usr/local/lib/python3.14/site-packages/pip \
 # lines that unit fails with "No config file 'alembic.ini' found", which is to
 # say the documented deployment path for a release carrying a migration did not
 # work. Root-owned and read-only to the application, like everything else here.
-COPY --chown=root:root alembic.ini /app/
-COPY --chown=root:root migrations /app/migrations
+COPY --chown=root:root backend/alembic.ini /app/
+COPY --chown=root:root backend/migrations /app/migrations
 
 # ONE script, named explicitly. Not `COPY scripts /app/scripts`.
 #
@@ -143,12 +183,25 @@ COPY --chown=root:root migrations /app/migrations
 # job here.
 #
 # Root-owned: the application account may execute this, never edit it.
-COPY --chown=root:root scripts/provision_app_role.py /app/scripts/
+COPY --chown=root:root backend/scripts/provision_app_role.py /app/scripts/
 
 # The entrypoint, and root-owned for the same reason as the script above but more
 # sharply: it is what decides whether `X-Forwarded-For` is believed, so the
 # account that serves the requests must not be able to rewrite it.
-COPY --chown=root:root scripts/entrypoint.sh /app/scripts/
+COPY --chown=root:root backend/scripts/entrypoint.sh /app/scripts/
+
+# The built interface, for the proxy to serve.
+#
+# It is NOT served by this container: `--no-access-log` and the whole reason the
+# Caddyfile exists say static files belong in front, where the nine security
+# headers, both Content-Security-Policies and the filtered access log live. This
+# image only *carries* the bytes; `chaudron-frontend.container` in the Ansible
+# role copies them out into the volume Caddy reads.
+#
+# Root-owned and read-only to the service account, like every other file here:
+# the account that answers requests has no reason to be able to rewrite the
+# interface it hands out.
+COPY --from=frontend --chown=root:root /app/dist /app/frontend
 
 # Any __pycache__ the build context happened to carry is stale by definition and
 # has no business in a release artefact.

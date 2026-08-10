@@ -368,9 +368,9 @@ podman run -d --name chaudron-db \
 cd backend && uv sync && uv run alembic upgrade head
 uv run uvicorn chaudron.api.main:app --reload            # one worker: see the warning above
 
-# Frontend
-cd ../frontend && cp .env.example .env.local   # one value: the API base URL
-npm install && npm run dev
+# Frontend — no configuration for the dev loop: the API address defaults to the
+# origin the page is served from, and the dev server proxies it.
+cd ../frontend && npm install && npm run dev
 ```
 
 Then open the app and **create an account**, then **sign in** — two steps, not

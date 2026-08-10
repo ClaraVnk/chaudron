@@ -57,9 +57,17 @@ function ConfigurationScreen({ message }: { message: string }) {
     <main className={styles.fatal}>
       <h1>Chaudron n’est pas configuré</h1>
       <p>{message}</p>
+      {/*
+        No longer "fill in VITE_API_BASE_URL and rebuild": the API address now
+        defaults to the origin the page was served from, so the ordinary
+        deployment needs no build-time value at all. Reaching this screen means
+        the page has no usable origin — opened from `file://`, or in a sandboxed
+        frame — which rebuilding does not fix.
+      */}
       <p>
-        Copiez <code>.env.example</code> vers <code>.env.local</code> dans <code>frontend/</code>,
-        renseignez <code>VITE_API_BASE_URL</code>, puis relancez la construction.
+        Servez cette page en <code>http://</code> ou <code>https://</code> plutôt que depuis un
+        fichier local. Si l’API vit sur une autre origine que l’interface, renseignez{' '}
+        <code>VITE_API_BASE_URL</code> dans <code>frontend/.env.local</code> et reconstruisez.
       </p>
     </main>
   );

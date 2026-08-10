@@ -215,6 +215,26 @@ The canonical URL, the Open Graph tags, the JSON-LD and `sitemap.xml` all need a
 VITE_SITE_URL=https://chaudron.mondomaine.tld npm run build
 ```
 
+> [!NOTE]
+> **A third mode exists, and it is how the published image is built.**
+> `VITE_DEFER_SITE_URL=1` leaves the literal `__SITE_URL__` in `index.html`,
+> `robots.txt` and `sitemap.xml`, for the *deployment* to substitute.
+>
+> That is what makes one artefact deployable by everybody. The site URL was the
+> last thing tying a build to one instance — the API address stopped being baked
+> in when it started defaulting to the origin the page was served from
+> (`src/api/config.ts`) — so deferring it lets the interface ship inside
+> `ghcr.io/claravnk/chaudron`, under the same cosign signature and digest pin as
+> the API, instead of as a tarball each operator builds and nobody can verify.
+>
+> Deferring is **not** a relaxation of the guard below: a build that simply
+> forgot the variable still fails. It is a statement that the substitution
+> happens later, and the deployment is expected to fail just as loudly if a
+> placeholder survives to a served file — see the Ansible role's
+> *Assert no `__SITE_URL__` placeholder survived*. A placeholder that reached a
+> browser would put a non-URL in `<link rel="canonical">` and in every shared
+> link preview, and nothing else would report it.
+
 Without the variable, a `build` now **fails**. It used to warn and fall back to
 `https://chaudron.example` — a domain reserved by RFC 2606, hence unresolvable,
 so an oversight pointed at nowhere rather than at somebody else's site.

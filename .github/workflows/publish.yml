@@ -214,6 +214,9 @@ jobs:
           SHORT: ${{ steps.ref.outputs.short }}
         run: |
           set -euo pipefail
+          # Context is the repository root, not `backend/`: the image now builds
+          # the interface too, and `frontend/` has to be reachable. What the
+          # builder may see is bounded by `.containerignore` at the root.
           podman build \
             --format docker \
             --file backend/Containerfile \
@@ -222,7 +225,7 @@ jobs:
             --label "org.opencontainers.image.revision=${SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.licenses=AGPL-3.0-or-later" \
-            backend
+            .
 
       # The immutable tag carries the same 12-character SHA the build was tagged
       # with. Pushing the full 40-character SHA, as this step used to, pushed a

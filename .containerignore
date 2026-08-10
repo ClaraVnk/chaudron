@@ -1,0 +1,52 @@
+# What `podman build` may see, now that the context is the repository root.
+#
+# The context widened from `backend/` to `.` so the image could build the
+# interface (see the header of `backend/Containerfile`). That change hands the
+# builder everything in the tree unless it is excluded here, which is both a
+# speed problem and a disclosure one: a build context is uploaded whole, and
+# anything in it can end up in a layer through a careless `COPY`.
+#
+# The Containerfile copies by explicit path and never `COPY . .`, so nothing
+# below can reach an image by accident today. This file is the second control,
+# for the day somebody adds a broader COPY.
+
+# Version control and CI metadata.
+.git/
+.github/
+.gitea/
+.gitignore
+.containerignore
+
+# Never in a build context, let alone an image.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Dependencies and build output — reinstalled and rebuilt inside the image, and
+# `node_modules` alone is hundreds of megabytes of context for nothing.
+**/node_modules/
+**/.venv/
+frontend/dist/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+
+# Not part of any artefact.
+docs/
+ops/
+homeassistant/
+tools/
+assets/
+backend/tests/
+*.md
+!frontend/README.md
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
