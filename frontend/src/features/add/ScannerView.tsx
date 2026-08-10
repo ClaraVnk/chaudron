@@ -59,6 +59,63 @@ function describeCameraError(error: unknown): string {
   }
 }
 
+/**
+ * The camera stream, deliberately outside React.
+ *
+ * Scanning a shopping trip means twenty products in a row, and the add flow
+ * unmounts this component after every single one: detect → look up → fill the
+ * form → save → scan again. Each remount used to call `getUserMedia` afresh, so
+ * every product paid a cold start — the permission indicator, autofocus,
+ * exposure — and the user paid it twenty times. That is the complaint this
+ * exists to answer.
+ *
+ * Holding the stream at module scope lets the next mount reattach the *same*
+ * live tracks to the new `<video>`, which is instant.
+ *
+ * The obvious risk is the one that matters: a camera left running is a camera
+ * left running, and this application lives in a kitchen. So the stream is never
+ * simply kept — releasing it is *deferred*, and only for as long as somebody
+ * plausibly stayed in the flow. Leaving deliberately (cancel, manual entry)
+ * releases it at once, and a mount that never comes releases it on the timer.
+ */
+let sharedStream: MediaStream | null = null;
+let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * How long the stream may outlive an unmount.
+ *
+ * It bounds "the camera is on while nothing is scanning", so it is a privacy
+ * number rather than a performance one. Long enough to type a quantity and pick
+ * a location without paying a restart; short enough that a user who wandered off
+ * mid-form does not leave the LED on for the rest of the afternoon.
+ */
+const RELEASE_GRACE_MS = 90_000;
+
+function isLive(stream: MediaStream | null): stream is MediaStream {
+  return stream !== null && stream.getVideoTracks().some((track) => track.readyState === 'live');
+}
+
+function cancelPendingRelease(): void {
+  if (releaseTimer !== null) {
+    clearTimeout(releaseTimer);
+    releaseTimer = null;
+  }
+}
+
+/** Stop the tracks for real. The LED goes out here and nowhere else. */
+function releaseSharedStream(): void {
+  cancelPendingRelease();
+  sharedStream?.getTracks().forEach((track) => {
+    track.stop();
+  });
+  sharedStream = null;
+}
+
+function scheduleRelease(): void {
+  cancelPendingRelease();
+  releaseTimer = setTimeout(releaseSharedStream, RELEASE_GRACE_MS);
+}
+
 export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -74,18 +131,37 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
   const [gtinInput, setGtinInput] = useState('');
   const [gtinError, setGtinError] = useState<string | null>(null);
 
-  const stop = useCallback(() => {
+  /**
+   * Stop decoding and let go of the video element, but keep the tracks alive so
+   * the next scan reattaches instead of restarting. Use this on the paths that
+   * lead *back here* — a detection, which the add flow follows with a form and
+   * then another scan.
+   */
+  const pause = useCallback(() => {
     runningRef.current = false;
-    streamRef.current?.getTracks().forEach((track) => {
-      track.stop();
-    });
-    streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    streamRef.current = null;
   }, []);
 
-  // A stream left open keeps the LED on and drains the battery; on iOS it also
-  // contributes to the black-video bug. Always release on unmount.
-  useEffect(() => stop, [stop]);
+  /** Stop decoding and end the stream. For the paths that leave the flow. */
+  const release = useCallback(() => {
+    pause();
+    releaseSharedStream();
+  }, [pause]);
+
+  // On unmount the stream is kept and its release deferred: the add flow
+  // unmounts this component between every two scans, and tearing the camera down
+  // there is exactly the cold start being removed. A mount that never comes back
+  // is caught by the timer instead.
+  useEffect(
+    () => () => {
+      runningRef.current = false;
+      if (videoRef.current) videoRef.current.srcObject = null;
+      streamRef.current = null;
+      scheduleRelease();
+    },
+    [],
+  );
 
   const start = useCallback(async () => {
     setError(null);
@@ -100,30 +176,42 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
       return;
     }
 
+    // Only the acquisition is short-circuited. Everything below — attaching the
+    // element, playing, reading the track for torch support, the decode loop —
+    // runs identically whether the stream is new or reused, so the fast path
+    // cannot drift away from the slow one.
     let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        // `ideal`, never `exact`: with `exact` the call simply fails on devices
-        // without a rear camera, which breaks desktop development.
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
-    } catch (cause) {
-      setPhase('error');
-      setError(describeCameraError(cause));
-      return;
+    if (isLive(sharedStream)) {
+      cancelPendingRelease();
+      stream = sharedStream;
+    } else {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          // `ideal`, never `exact`: with `exact` the call simply fails on devices
+          // without a rear camera, which breaks desktop development.
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (cause) {
+        setPhase('error');
+        setError(describeCameraError(cause));
+        return;
+      }
+      sharedStream = stream;
     }
 
     streamRef.current = stream;
     const video = videoRef.current;
     if (!video) {
-      stream.getTracks().forEach((track) => {
-        track.stop();
-      });
+      // No element to attach to: end the stream rather than leaving it running
+      // with nothing displaying it. `releaseSharedStream` rather than stopping
+      // the tracks directly, so the module-level handle is cleared too and the
+      // next mount does not reuse a dead stream.
+      releaseSharedStream();
       return;
     }
     video.srcObject = stream;
@@ -156,7 +244,7 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
       });
       detector = new BarcodeDetector({ formats: [...RETAIL_FORMATS] });
     } catch (cause) {
-      stop();
+      release();
       setPhase('error');
       setError(
         `Le décodeur de code-barres n'a pas pu être chargé (${cause instanceof Error ? cause.message : 'erreur inconnue'}). Utilisez la saisie manuelle.`,
@@ -189,7 +277,9 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
               if (!last || last.value !== value || now - last.at > DUPLICATE_WINDOW_MS) {
                 lastValueRef.current = { value, at: now };
                 clearTimeout(struggleTimer);
-                stop();
+                // `pause`, not `release`: the add flow comes straight back here
+                // for the next product, and that is the restart being avoided.
+                pause();
                 navigator.vibrate?.(40);
                 onDetected(value);
                 return;
@@ -205,7 +295,7 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
     };
 
     void tick();
-  }, [onDetected, stop]);
+  }, [onDetected, pause, release]);
 
   const toggleTorch = useCallback(() => {
     const track = streamRef.current?.getVideoTracks()[0];
@@ -234,7 +324,8 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
       return;
     }
     setGtinError(null);
-    stop();
+    // Typing a code by hand means the camera was not the way in; do not hold it.
+    release();
     onDetected(digits);
   };
 
@@ -321,7 +412,7 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
         <Button
           variant="ghost"
           onClick={() => {
-            stop();
+            release();
             onCancel();
           }}
         >
