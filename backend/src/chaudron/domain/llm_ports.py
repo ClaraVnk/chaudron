@@ -329,6 +329,8 @@ class RecipeRequest:
     #: ``any`` | ``hot`` | ``cold``. A preference; contract 4ter forbids treating
     #: it as a filter, because no program can tell whether a recipe is cold.
     meal_temperature: str = "any"
+    #: "any" | "savoury" | "pastry". A preference, never a filter.
+    dish_kind: str = "any"
     #: How the food has to be served when a young child is at the table. Carried
     #: as a preparation requirement rather than as a filter: no catalogue column
     #: says whether a product can be pureed.

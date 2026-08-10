@@ -4,6 +4,7 @@ import { getBalance, getSuggestionQuality, suggestRecipes } from '../../api/endp
 import type {
   AppliedConstraints,
   HouseholdMember,
+  DishKind,
   MealTemperature,
   RecipeSuggestion,
   StorageLocation,
@@ -167,6 +168,7 @@ export function RecipesScreen({ locations, members }: Props) {
   // string, never localStorage.
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [mealTemperature, setMealTemperature] = useState<MealTemperature>(readMealTemperature);
+  const [dishKind, setDishKind] = useState<DishKind>('any');
   const [suggestions, setSuggestions] = useState<RecipeSuggestion[] | null>(null);
   const [applied, setApplied] = useState<AppliedConstraints | null>(null);
   const [balance, setBalance] = useState<WeeklyBalance | null>(null);
@@ -245,6 +247,7 @@ export function RecipesScreen({ locations, members }: Props) {
       member_ids: selectedMembers,
       balance_mode: 'weekly',
       meal_temperature: mealTemperature,
+      dish_kind: dishKind,
     })
       .then((response) => {
         setSuggestions(response.suggestions);
@@ -322,12 +325,14 @@ export function RecipesScreen({ locations, members }: Props) {
                 effective={effectiveMembers}
                 constraints={constraints}
                 mealTemperature={mealTemperature}
+                dishKind={dishKind}
                 onToggleMember={(id, checked) => {
                   setSelectedMembers((current) =>
                     checked ? [...current, id] : current.filter((value) => value !== id),
                   );
                 }}
                 onMealTemperature={chooseTemperature}
+                onDishKind={setDishKind}
               />
             )}
 

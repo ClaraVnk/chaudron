@@ -42,7 +42,7 @@ from chaudron.api.schemas import (
     UrgentItemOut,
 )
 from chaudron.api.serialisers import to_balance_out
-from chaudron.domain.constraints import MealTemperature
+from chaudron.domain.constraints import DishKind, MealTemperature
 from chaudron.domain.llm_ports import (
     LlmError,
     ProviderCapabilityUnavailable,
@@ -111,6 +111,7 @@ async def suggest_recipes(
                 member_ids=tuple(payload.member_ids),
                 balance_mode=BalanceMode(payload.balance_mode),
                 meal_temperature=MealTemperature(payload.meal_temperature),
+                dish_kind=DishKind(payload.dish_kind),
             ),
         )
     except LlmError as error:

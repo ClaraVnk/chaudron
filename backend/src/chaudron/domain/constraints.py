@@ -61,6 +61,7 @@ __all__ = [
     "INFANT_BANDS",
     "MAX_FREE_TEXT_PREFERENCES",
     "PANTRY_STAPLES",
+    "DishKind",
     "HouseholdConstraints",
     "InfantRule",
     "MealTemperature",
@@ -95,6 +96,33 @@ class MealTemperature(enum.StrEnum):
     ANY = "any"
     HOT = "hot"
     COLD = "cold"
+
+
+class DishKind(enum.StrEnum):
+    """What kind of dish is wanted. A *preference*, like `MealTemperature`.
+
+    It exists because the system prompt opens with "You plan home meals", and a
+    household asking for a cake in the free-text note was therefore arguing with
+    the instruction above it — sometimes winning, sometimes not. A structured
+    value settles that: the server composes the sentence, so it sits outside the
+    untrusted data block and reads as an instruction rather than as a request
+    from a product label.
+
+    `PASTRY` is not simply "a sweet meal". Baking differs from cooking in the one
+    way this application is well placed to help with: it does not tolerate
+    approximate quantities. A stew works with roughly enough onion; a cake does
+    not work with roughly enough flour. Chaudron holds real quantities, so the
+    prompt can ask for a recipe the household can actually complete rather than
+    one they discover they cannot halfway through.
+
+    Nothing filters on it. There is no catalogue column saying a product is for
+    baking, so like every other preference here the divergence between what was
+    asked and what came back is *displayed*, never prevented (contract 4ter).
+    """
+
+    ANY = "any"
+    SAVOURY = "savoury"
+    PASTRY = "pastry"
 
 
 #: The regulated names, in French, as annex II of EU 1169/2011 publishes them.

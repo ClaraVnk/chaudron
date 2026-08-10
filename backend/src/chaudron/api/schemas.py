@@ -624,6 +624,9 @@ class SuggestRecipesIn(StrictModel):
     ]
     balance_mode: Literal["weekly", "off"] = "weekly"
     meal_temperature: Literal["any", "hot", "cold"] = "any"
+    #: A preference like the one above, never a filter: nothing in the catalogue
+    #: says a product is for baking, so there is no predicate to apply.
+    dish_kind: Literal["any", "savoury", "pastry"] = "any"
 
 
 class TokenUsageOut(BaseModel):

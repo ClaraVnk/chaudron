@@ -65,6 +65,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from chaudron.domain.balance import WeeklyBalance, shortfall_sentence
 from chaudron.domain.constraints import (
     ALLERGEN_LABELS,
+    DishKind,
     HouseholdConstraints,
     MealTemperature,
     Resolution,
@@ -139,6 +140,7 @@ class SuggestRecipesCommand:
     member_ids: tuple[uuid.UUID, ...] = ()
     balance_mode: BalanceMode = BalanceMode.WEEKLY
     meal_temperature: MealTemperature = MealTemperature.ANY
+    dish_kind: DishKind = DishKind.ANY
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +308,7 @@ class RecipeService:
             preferences=constraints.preferences,
             balance_hint=None if balance is None else shortfall_sentence(balance.gaps),
             meal_temperature=command.meal_temperature.value,
+            dish_kind=command.dish_kind.value,
             infant_texture=(
                 None if constraints.infant_texture is None else constraints.infant_texture.value
             ),
@@ -627,6 +630,7 @@ def _snapshot(
         "balance_mode": command.balance_mode.value,
         "balance_reference": None if balance is None else balance.reference,
         "meal_temperature": command.meal_temperature.value,
+        "dish_kind": command.dish_kind.value,
         "products_withheld": screened.withheld,
         "products_unverified": screened.unverified,
         "items": [

@@ -1,10 +1,11 @@
-import type { HouseholdMember, MealTemperature } from '../../api/types';
+import type { DishKind, HouseholdMember, MealTemperature } from '../../api/types';
 import { Checkbox, ClassTag, Fieldset, Radio } from '../../components/ui';
 import { AllergenDisclaimer, InfantDisclaimer } from '../../components/SafetyNotice';
 import {
   AGE_BAND_LABELS,
   ALLERGEN_LABELS,
   DIET_LABELS,
+  DISH_KIND_LABELS,
   MEAL_TEMPERATURE_LABELS,
   TEXTURE_LABELS,
 } from '../../lib/dietary';
@@ -18,8 +19,10 @@ interface Props {
   effective: HouseholdMember[];
   constraints: UnionConstraints;
   mealTemperature: MealTemperature;
+  dishKind: DishKind;
   onToggleMember: (id: string, checked: boolean) => void;
   onMealTemperature: (value: MealTemperature) => void;
+  onDishKind: (value: DishKind) => void;
 }
 
 /**
@@ -41,8 +44,10 @@ export function CookingForPanel({
   effective,
   constraints,
   mealTemperature,
+  dishKind,
   onToggleMember,
   onMealTemperature,
+  onDishKind,
 }: Props) {
   const everyone = selectedIds.length === 0;
 
@@ -138,6 +143,30 @@ export function CookingForPanel({
               }}
             >
               {MEAL_TEMPERATURE_LABELS[value]}
+            </Radio>
+          ))}
+        </Fieldset>
+
+        {/*
+          Baking is a different request from "a meal", not a flavour of one. The
+          system prompt opens with "you plan home cooking … meals by default",
+          so a household typing "un gâteau" into the free-text note was arguing
+          with the instruction above it and winning only sometimes. A structured
+          value is composed by the server, which puts it outside the untrusted
+          block and makes it read as an instruction.
+        */}
+        <Fieldset legend="Type de plat">
+          {(['any', 'savoury', 'pastry'] as DishKind[]).map((value) => (
+            <Radio
+              key={value}
+              name="dish-kind"
+              value={value}
+              checked={dishKind === value}
+              onSelect={(next) => {
+                onDishKind(next as DishKind);
+              }}
+            >
+              {DISH_KIND_LABELS[value]}
             </Radio>
           ))}
         </Fieldset>

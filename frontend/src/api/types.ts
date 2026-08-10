@@ -354,6 +354,7 @@ export type MemberDraft = Omit<HouseholdMember, 'id'>;
 
 /** Third-class constraint (§4bis): a preference sent to the model, never a filter. */
 export type MealTemperature = 'any' | 'hot' | 'cold';
+export type DishKind = 'any' | 'savoury' | 'pastry';
 
 export type ServingTemperature = 'hot' | 'cold' | 'either';
 
@@ -471,6 +472,7 @@ export interface SuggestRecipesRequest {
   member_ids: string[];
   balance_mode: 'weekly' | 'off';
   meal_temperature: MealTemperature;
+  dish_kind: DishKind;
 }
 
 export interface SuggestRecipesResponse {
