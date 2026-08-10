@@ -1,9 +1,10 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { describeError } from '../../api/client';
-import { ALLERGEN_CODES } from '../../api/types';
+import { ALLERGEN_CODES, AVOIDED_INGREDIENT_CODES } from '../../api/types';
 import type {
   AgeBand,
   AllergenCode,
+  AvoidedIngredientCode,
   Diet,
   HouseholdMember,
   InfantTexture,
@@ -11,11 +12,16 @@ import type {
 } from '../../api/types';
 import { Button, Callout, Checkbox, ClassTag, Field, Fieldset } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
-import { AllergenDisclaimer, InfantDisclaimer } from '../../components/SafetyNotice';
+import {
+  AllergenDisclaimer,
+  AvoidedIngredientDisclaimer,
+  InfantDisclaimer,
+} from '../../components/SafetyNotice';
 import {
   AGE_BANDS,
   AGE_BAND_LABELS,
   ALLERGEN_LABELS,
+  AVOIDED_INGREDIENT_LABELS,
   DIETS,
   DIET_LABELS,
   TEXTURES,
@@ -46,6 +52,13 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
   const [ageBand, setAgeBand] = useState<AgeBand>(member?.age_band ?? 'adult');
   const [diet, setDiet] = useState<Diet>(member?.diet ?? 'omnivore');
   const [allergens, setAllergens] = useState<AllergenCode[]>(member?.allergens ?? []);
+  const [avoided, setAvoided] = useState<AvoidedIngredientCode[]>(
+    member?.avoided_ingredients ?? [],
+  );
+  // Named-only by default. The other reading withholds most of the catalogue,
+  // and a default that empties the inventory would be read as a broken app
+  // rather than as a choice — so it is one the household makes deliberately.
+  const [strict, setStrict] = useState(member?.avoided_ingredients_strict ?? false);
   const [texture, setTexture] = useState<InfantTexture>(member?.infant_texture ?? 'smooth');
   const [freeText, setFreeText] = useState(member?.free_text_restrictions ?? '');
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -69,6 +82,14 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
     );
   };
 
+  const toggleAvoided = (code: AvoidedIngredientCode, checked: boolean) => {
+    setAvoided((current) =>
+      checked
+        ? AVOIDED_INGREDIENT_CODES.filter((value) => value === code || current.includes(value))
+        : current.filter((value) => value !== code),
+    );
+  };
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitError(null);
@@ -83,6 +104,10 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
       age_band: ageBand,
       diet,
       allergens,
+      avoided_ingredients: avoided,
+      // Meaningless without a tick, and the toggle is hidden then; sending the
+      // stale flag would make an emptied list keep a mode nobody can see.
+      avoided_ingredients_strict: avoided.length > 0 && strict,
       free_text_restrictions: freeText.trim().slice(0, FREE_TEXT_MAX),
       // The contract 422s on an infant band without a texture, and on a texture
       // without an infant band. Enforced here so the server never has to.
@@ -217,6 +242,58 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
           ))}
         </div>
       </Fieldset>
+
+      <AvoidedIngredientDisclaimer />
+
+      <Fieldset
+        legend="Aliments à éviter"
+        hint={
+          <>
+            <ClassTag kind="filter" /> Kiwi, fraise, banane, lait de vache… Retirés de l’inventaire
+            comme les allergènes ci-dessus, mais sur la foi d’une liste d’ingrédients contributive :
+            c’est au mieux, pas une déclaration réglementaire.
+          </>
+        }
+      >
+        <div className={styles.allergenGrid}>
+          {AVOIDED_INGREDIENT_CODES.map((code) => (
+            <Checkbox
+              key={code}
+              checked={avoided.includes(code)}
+              onChange={(checked) => {
+                toggleAvoided(code, checked);
+              }}
+            >
+              {AVOIDED_INGREDIENT_LABELS[code]}
+            </Checkbox>
+          ))}
+        </div>
+      </Fieldset>
+
+      {/* Only once something is ticked. Asked of a household that avoids
+          nothing, the question is unanswerable — and it is the question that
+          decides whether the inventory keeps most of its products or loses
+          them. */}
+      {avoided.length > 0 ? (
+        <Fieldset
+          legend="Que faire des produits sans liste d’ingrédients ?"
+          hint="La plupart des produits n’en publient aucune. Les deux réponses ont un coût, il n’y a pas de réglage sûr."
+        >
+          <Checkbox
+            checked={strict}
+            onChange={(checked) => {
+              setStrict(checked);
+            }}
+          >
+            Les écarter aussi, par précaution
+          </Checkbox>
+          <p className={styles.preferenceNote}>
+            {strict
+              ? 'Mesuré sur 1 263 864 produits français : 86,8 % du catalogue serait écarté, dont la plupart des produits emballés et un tiers du frais. Les suggestions deviendront rares, parfois nulles.'
+              : 'Un produit qui ne publie rien reste proposé, même s’il contient l’aliment. Chaudron ne peut pas le savoir : personne ne l’a écrit.'}
+          </p>
+        </Fieldset>
+      ) : null}
 
       <Field
         label="Autres restrictions"

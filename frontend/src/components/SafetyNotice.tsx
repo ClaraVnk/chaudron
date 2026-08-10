@@ -52,11 +52,11 @@ export function AvoidedIngredientDisclaimer() {
       </p>
       <p>
         Chaudron retire de l’inventaire les produits dont la liste d’ingrédients nomme l’aliment
-        coché, <strong>et</strong> tous ceux dont la liste est absente ou illisible — donc aussi les
-        fruits et légumes frais, qui n’en ont presque jamais. Vous verrez donc moins de suggestions.
-        Mais une liste d’ingrédients peut être incomplète ou fausse : c’est un wiki. Pour une
-        allergie, cochez la case correspondante au-dessus — c’est la liste réglementaire, et ce
-        n’est pas la même chose.
+        coché. Mais sur les produits français d’Open Food Facts, <strong>13 % seulement</strong>{' '}
+        publient une liste exploitable : un produit qui ne dit rien est donc conservé, même s’il en
+        contient. Et une liste peut être incomplète ou fausse — c’est un wiki. Pour une allergie,
+        cochez la case correspondante au-dessus : c’est la liste réglementaire, un industriel a
+        l’obligation d’y déclarer, et ce n’est pas la même chose.
       </p>
     </div>
   );
