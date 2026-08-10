@@ -77,7 +77,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.schema import conv
 
-from chaudron.domain.models import _ALLERGENS_RISK_SQL, NAMING_CONVENTION, Base
+from chaudron.domain.models import (
+    _ALLERGENS_RISK_SQL,
+    _AVOIDED_INGREDIENTS_RISK_SQL,
+    ALL_AVOIDED_INGREDIENTS_SQL,
+    NAMING_CONVENTION,
+    Base,
+)
 
 #: The PostgreSQL identifier preparer -- the object that decides what a name looks
 #: like once it reaches the database, truncation included. Asking it rather than
@@ -445,14 +451,18 @@ def test_the_migrations_leave_nothing_for_autogenerate_to_propose(
     model.
 
     **Its second blind spot is computed columns**, and it announces it: this test is
-    the source of the suite's only warning, *"Computed default on
-    product.allergens_risk cannot be modified"*. Autogenerate skips generation
-    expressions, so an edit to the ``CASE`` that decides whether a product is
-    withheld from someone allergic to it would leave this green. That gap is covered
-    by ``test_the_generated_column_still_computes_what_the_model_declares`` below,
-    which compares the deployed expression against the model's declaration through
-    PostgreSQL's own normaliser -- and by its companion, which proves the comparison
-    can tell a changed expression from an unchanged one.
+    the source of the suite's only warnings, one per generated column -- *"Computed
+    default on product.allergens_risk cannot be modified"* and its twin for
+    ``product.avoided_ingredients_risk``. Autogenerate skips generation expressions,
+    so an edit to either ``CASE`` -- the one that decides whether a product is
+    withheld from someone allergic to it, or the one that decides whether it is
+    withheld from someone who cannot eat it -- would leave this green. That gap is
+    covered by the drift guards below, which compare each deployed expression
+    against the model's declaration through PostgreSQL's own normaliser, by their
+    companions proving the comparison can tell a changed expression from an
+    unchanged one, and by
+    :func:`test_every_generated_column_has_a_drift_guard`, which fails when a third
+    generated column is added without one.
 
     Its diff is not actionable on its own. A renamed unique constraint is reported
     as a ``remove_constraint``/``add_constraint`` pair that prints columns and no
@@ -637,11 +647,11 @@ async def test_the_catalogue_guard_fails_on_a_doubled_name(db_session: AsyncSess
 async def test_the_generated_column_still_computes_what_the_model_declares(
     db_session: AsyncSession,
 ) -> None:
-    """The one drift ``alembic check`` above cannot see, and the riskiest to miss.
+    """The drift ``alembic check`` above cannot see, and the riskiest to miss.
 
-    Autogenerate refuses to compare computed defaults -- it says so out loud, as the
-    suite's only warning: *"Computed default on product.allergens_risk cannot be
-    modified"*. So the backstop that catches a forgotten column or a widened numeric
+    Autogenerate refuses to compare computed defaults -- it says so out loud, as one
+    of the suite's only warnings: *"Computed default on product.allergens_risk cannot
+    be modified"*. So the backstop that catches a forgotten column or a widened numeric
     is blind to the expression behind the single column that decides whether a
     product is withheld from someone who is allergic to it. A migration editing that
     ``CASE`` would leave every test in this file green.
@@ -730,6 +740,157 @@ async def test_the_generated_column_guard_notices_a_changed_expression(
             " WHERE table_name = 'product' AND column_name = 'allergens_risk'"
         )
     )
+
+    assert mutated, "the probe table did not produce a generation expression"
+    assert mutated != deployed, (
+        "the guard above cannot tell a changed expression from the deployed one, "
+        "so its passing says nothing"
+    )
+
+
+#: The generated columns this file guards, as ``(table, column)``.
+#:
+#: Its purpose is :func:`test_every_generated_column_has_a_drift_guard`, which
+#: compares it against what ``Base.metadata`` actually declares. Without that
+#: comparison, adding a third generated column would silently reintroduce exactly
+#: the blind spot the two guards below exist to close -- and it would do so
+#: quietly, because every test in this file would still pass.
+_GUARDED_GENERATED_COLUMNS: Final[frozenset[tuple[str, str]]] = frozenset(
+    {("product", "allergens_risk"), ("product", "avoided_ingredients_risk")}
+)
+
+#: The columns a probe table needs before the expression above will compile,
+#: keyed by the column each guard is about. Written out rather than derived from
+#: the model: the point of the probe is to hand PostgreSQL the *model's* string
+#: and read back its own rendering, and generating the surrounding DDL from the
+#: same metadata would make the two sides agree by construction.
+_PROBE_COLUMNS: Final[dict[str, str]] = {
+    "allergens_risk": (
+        " allergen_state allergen_data_state NOT NULL DEFAULT 'unknown',"
+        " allergens_contains allergen[] NOT NULL DEFAULT '{}',"
+        " allergens_may_contain allergen[] NOT NULL DEFAULT '{}',"
+    ),
+    "avoided_ingredients_risk": (
+        " ingredient_state ingredient_data_state NOT NULL DEFAULT 'unknown',"
+        " avoided_ingredients_named avoided_ingredient[] NOT NULL DEFAULT '{}',"
+    ),
+}
+
+_PROBE_TYPE: Final[dict[str, str]] = {
+    "allergens_risk": "allergen[]",
+    "avoided_ingredients_risk": "avoided_ingredient[]",
+}
+
+
+async def _expression(session: AsyncSession, table: str, column: str) -> str | None:
+    expression = await session.scalar(
+        text(
+            "SELECT generation_expression FROM information_schema.columns"
+            " WHERE table_name = :table AND column_name = :column"
+        ).bindparams(table=table, column=column)
+    )
+    return None if expression is None else str(expression)
+
+
+async def _rendered_by_postgres(
+    session: AsyncSession, *, column: str, expression: str, probe: str
+) -> str | None:
+    """PostgreSQL's own spelling of ``expression``, on a throwaway table.
+
+    Comparing the model's string to the catalogue's as *text* would be a test that
+    fails on whitespace: the server stores its normalised rendering, not what it
+    was handed. Both sides therefore come out of the same normaliser, and what is
+    left to compare is the meaning.
+    """
+    await session.execute(
+        text(
+            f"CREATE TABLE {probe} ("
+            f"{_PROBE_COLUMNS[column]}"
+            f" {column} {_PROBE_TYPE[column]} GENERATED ALWAYS AS ({expression}) STORED"
+            ")"
+        )
+    )
+    return await _expression(session, probe, column)
+
+
+def test_every_generated_column_has_a_drift_guard() -> None:
+    """A third computed column must not slip past this file unnoticed.
+
+    The same shape as :func:`test_every_naming_family_is_covered`, and it exists
+    for the same reason: the guards below are enumerated by hand, autogenerate
+    cannot see what they cover, and a generated column with nobody watching its
+    expression is precisely the hole this file was written to close.
+    """
+    declared = {
+        (table.name, column.name)
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if column.computed is not None
+    }
+
+    assert declared == _GUARDED_GENERATED_COLUMNS, (
+        f"the model declares generated columns {sorted(declared)} and this file guards "
+        f"{sorted(_GUARDED_GENERATED_COLUMNS)}. `alembic check` skips computed defaults, "
+        f"so an unguarded one can have its expression rewritten by a migration with "
+        f"nothing failing. Add it to _GUARDED_GENERATED_COLUMNS, _PROBE_COLUMNS and "
+        f"_PROBE_TYPE, and give it the pair of tests the others have."
+    )
+
+
+async def test_the_avoided_ingredient_column_still_computes_what_the_model_declares(
+    db_session: AsyncSession,
+) -> None:
+    """The same guard over the second generated column, and it is not redundant.
+
+    The two expressions are edited in different revisions for different reasons,
+    and this one is the newer and therefore the likelier to be "simplified" --
+    ``avoided_ingredients_named`` is right there, it is shorter, and dropping the
+    unknown branch would leave every documented product filtering correctly while
+    every undocumented one silently became available.
+
+    ``tests/domain/test_avoided_ingredient_unknown_is_not_safe.py`` covers the
+    *behaviour*. This covers what survives a subtler edit: that the deployed
+    expression is still the declared one, branch for branch.
+    """
+    deployed = await _expression(db_session, "product", "avoided_ingredients_risk")
+    assert deployed, "product.avoided_ingredients_risk is no longer a generated column"
+
+    declared = await _rendered_by_postgres(
+        db_session,
+        column="avoided_ingredients_risk",
+        expression=_AVOIDED_INGREDIENTS_RISK_SQL,
+        probe="_avoided_drift_probe",
+    )
+
+    assert deployed == declared, (
+        "product.avoided_ingredients_risk no longer computes what domain/models.py "
+        f"declares.\ndeployed: {deployed}\ndeclared: {declared}\n"
+        "`alembic check` cannot see this: it skips computed defaults. If the change "
+        "is deliberate, write the revision that applies it to `product` too."
+    )
+
+
+async def test_the_avoided_ingredient_guard_notices_a_changed_expression(
+    db_session: AsyncSession,
+) -> None:
+    """Build the drift and watch the detector catch it.
+
+    The mutation is the plausible one rather than an absurd one: replacing the
+    whole-vocabulary unknown branch with an empty array. That is the shape an
+    "optimisation" takes -- the column gets smaller, every row still looks
+    populated, and a product nobody could parse quietly stops being withheld.
+    """
+    honest = _AVOIDED_INGREDIENTS_RISK_SQL
+    drifted = honest.replace(ALL_AVOIDED_INGREDIENTS_SQL, "'{}'::avoided_ingredient[]")
+    assert drifted != honest, "the mutation did not change the expression"
+
+    mutated = await _rendered_by_postgres(
+        db_session,
+        column="avoided_ingredients_risk",
+        expression=drifted,
+        probe="_avoided_drift_probe_mutated",
+    )
+    deployed = await _expression(db_session, "product", "avoided_ingredients_risk")
 
     assert mutated, "the probe table did not produce a generation expression"
     assert mutated != deployed, (

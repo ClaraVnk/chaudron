@@ -41,7 +41,7 @@ from typing import Any, Final, Self
 import httpx
 
 from chaudron.config import Settings
-from chaudron.domain.dietary import assess_allergens, markers_for_categories
+from chaudron.domain.dietary import assess_allergens, assess_ingredients, markers_for_categories
 from chaudron.domain.ports import CatalogRecord, ProductCatalogUnavailableError, display_gtin
 from chaudron.domain.shelf_life import family_for_categories
 from chaudron.infra.untrusted_text import sanitize_optional
@@ -472,6 +472,7 @@ def _to_record(gtin: str, product: dict[str, Any], *, trusted_suffix: str) -> Ca
     # vocabularies, and a tag shortened to fit would either stop matching or --
     # worse -- start matching a different one.
     allergens = assess_allergens(product)
+    ingredients = assess_ingredients(product)
 
     net_value: Decimal | None = None
     net_unit: str | None = None
@@ -503,6 +504,9 @@ def _to_record(gtin: str, product: dict[str, Any], *, trusted_suffix: str) -> Ca
         allergen_state=allergens.state,
         allergens_contains=allergens.contains,
         allergens_may_contain=allergens.may_contain,
+        ingredient_state=ingredients.state,
+        avoided_ingredients_named=ingredients.named,
+        ingredients_tags=ingredients.tags,
         pnns_markers=markers_for_categories(categories, product.get("food_groups_tags")),
         food_family=family_for_categories(categories),
         payload=product,

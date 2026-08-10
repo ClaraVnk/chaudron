@@ -82,6 +82,7 @@ def _to_draft(payload: MemberIn) -> MemberDraft:
         age_band=payload.age_band,
         diet=payload.diet,
         allergens=tuple(payload.allergens),
+        avoided_ingredients=tuple(payload.avoided_ingredients),
         infant_texture=payload.infant_texture,
         free_text_restrictions=payload.free_text_restrictions.strip() or None,
     )
@@ -94,8 +95,9 @@ def _to_patch(payload: MemberPatchIn) -> MemberPatch:
     would make ``{"infant_texture": null}`` -- the request that turns a toddler
     into a child -- indistinguishable from a request that never mentioned the
     field. Only ``infant_texture`` is genuinely nullable: a name, a band, a diet
-    and a list of allergens have no "cleared" state, so ``null`` on those is read
-    as "not sent" rather than invented into a meaning.
+    and the two lists of exclusions have no "cleared" state, so ``null`` on those
+    is read as "not sent" rather than invented into a meaning -- clearing a list
+    is sending ``[]``.
     """
     sent = payload.model_fields_set
     return MemberPatch(
@@ -111,6 +113,11 @@ def _to_patch(payload: MemberPatchIn) -> MemberPatch:
         allergens=(
             tuple(payload.allergens)
             if "allergens" in sent and payload.allergens is not None
+            else UNSET
+        ),
+        avoided_ingredients=(
+            tuple(payload.avoided_ingredients)
+            if "avoided_ingredients" in sent and payload.avoided_ingredients is not None
             else UNSET
         ),
         infant_texture=payload.infant_texture if "infant_texture" in sent else UNSET,
@@ -130,6 +137,8 @@ def _to_out(person: Person) -> MemberOut:
         diet=person.diet,
         # Sorted for a stable response; the enum order is the regulation's.
         allergens=sorted(person.allergens),
+        # Same, over a vocabulary whose order is this application's own.
+        avoided_ingredients=sorted(person.avoided_ingredients),
         free_text_restrictions=person.free_text_restrictions or "",
         infant_texture=person.infant_texture,
     )

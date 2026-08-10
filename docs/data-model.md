@@ -1044,6 +1044,7 @@ on the transaction.
 | `age_band` | `age_band` NOT NULL DEFAULT `'adult'` | a band, never a date of birth |
 | `diet` | `diet` NOT NULL DEFAULT `'omnivore'` | |
 | `allergens` | `allergen[]` NOT NULL DEFAULT `'{}'` | **`deferred`** |
+| `avoided_ingredients` | `avoided_ingredient[]` NOT NULL DEFAULT `'{}'` | **`deferred`**, rev. `0028`. A filter, **not** a regulated declaration |
 | `infant_texture` | `infant_texture` NULL | `NULL` outside the infant bands |
 | `free_text_restrictions` | `text` NULL | **`deferred`**, ≤ 500 characters |
 | `sort_order` | `smallint` NOT NULL DEFAULT 0 | |
@@ -1073,7 +1074,8 @@ Hence: its own identity, its own tenant column, and an *optional* link to an
 account.
 
 **Everything below the name is health data** (GDPR art. 9), and for an infant, a
-minor's. `allergens` and `free_text_restrictions` are `deferred`, exactly like
+minor's. `allergens`, `avoided_ingredients` and `free_text_restrictions` are
+`deferred`, exactly like
 `LlmProviderConfig.api_key_ciphertext` (§9.2): an ordinary
 `select(HouseholdPerson)` — resolving a display name, for instance — does not
 load them, and the code that legitimately needs them says so with an `undefer()`
@@ -1092,7 +1094,7 @@ filter cannot carry what they say:
   screening of the inventory can express them. It discloses that a young child
   eats this meal, and at which feeding stage.
 
-`allergens`, `diet` and `age_band` never leave. The model learns what it may cook
+`allergens`, `avoided_ingredients`, `diet` and `age_band` never leave. The model learns what it may cook
 with, and of who is at the table only what it must be told in order to cook
 correctly. The infant *food* rules stay a filter like the allergens: it is the
 texture alone that travels.
@@ -1118,6 +1120,10 @@ and in `ollama` mode neither leaves the machine at all.
 - `ck_household_person_allergens_wellformed`: no `NULL` in the array, cardinality
   ≤ 14. A `NULL` in an array compares as *unknown* in every containment test —
   the one answer an allergy filter must never give.
+- `ck_household_person_avoided_ingredients_wellformed`: no `NULL` in the array,
+  cardinality ≤ the size of the vocabulary. Same `NULL` trap as above; the
+  ceiling is rendered from the enum so a later revision adding a member cannot
+  leave a bound nobody can reach.
 - `ck_household_person_free_text_length`: ≤ 500 characters, bounded **in the
   database too**, because a bound held by the API alone is a bound the next
   author forgets.
@@ -1274,6 +1280,64 @@ a visible hole in the evidence, not a confident “you are one fish short”.
   GIN.
 - `ix_product_pnns_markers` (GIN) → “what did this household eat in each group
   last week”, joined from the stock movements.
+
+#### What revision `0028` adds to `product`
+
+Four more columns, one of them generated, and the same mechanism again over a
+different upstream field.
+
+| Column | Type | Notes |
+|---|---|---|
+| `ingredient_state` | `ingredient_data_state` NOT NULL DEFAULT `'unknown'` | could the ingredient list be read at all? |
+| `ingredients_tags` | `text[]` NOT NULL DEFAULT `'{}'` | the raw OFF tags. **Evidence, never a filter input** |
+| `avoided_ingredients_named` | `avoided_ingredient[]` NOT NULL DEFAULT `'{}'` | what the parsed list names, narrowed to the vocabulary |
+| `avoided_ingredients_risk` | `avoided_ingredient[]` **GENERATED … STORED** | the only one a filter should read |
+
+```sql
+CASE WHEN ingredient_state = 'unknown' THEN <the whole vocabulary>
+     ELSE avoided_ingredients_named END
+```
+
+Deliberately the same `CASE` as `allergens_risk`, so that a product whose
+ingredient list nobody could parse is **maximally** excluded and the obvious
+query — `NOT (:member_avoided && avoided_ingredients_risk)` — withholds it
+without its author having thought about the unreadable case.
+
+**The vocabulary is closed, and that is what makes the `CASE` possible.** The
+unknown branch has to be a superset of everything a household can ask to avoid;
+over free text there is no such set, which is why `free_text_restrictions`
+remains a preference and `avoided_ingredient` is a native enum. Adding an
+ingredient is therefore a revision — it has to rewrite the generated column —
+and that price *is* the guarantee.
+
+**`declared` here is a weaker claim than on the allergen columns**, and nothing
+downstream may forget it. `allergen_state = 'declared'` rests on EU 1169/2011: a
+manufacturer was obliged to declare, so silence is a claim. `ingredient_state =
+'declared'` rests on Open Food Facts having published an ingredient list *and*
+every tag in it having resolved to its taxonomy — silence is only silence. The
+two stay separate columns, separate API fields and separate blocks on screen for
+that reason; merging them would hand the weaker one the stronger one's
+credibility. One unresolved tag sends the record back to `unknown` (a real case:
+product `3017624010701` publishes six ingredients, all six unparsed German free
+text).
+
+**`ingredients_tags` is kept even when the state is `unknown`**, unlike the
+allergen lists. It is the evidence of *why* the row is unreadable, and it is what
+a widened vocabulary can be backfilled from — the alternative being to re-fetch
+the catalogue through an API that permits ten calls a minute.
+
+**Constraints**
+
+- `ck_product_ingredient_unknown_is_empty`: unreadable ⇒ nothing resolved
+  recorded beside it. The half-filled list is the narrower answer a reader picks
+  by mistake.
+- `ck_product_ingredient_arrays_wellformed`: no `NULL` in either new array, for
+  the reason `ck_product_tag_arrays_wellformed` gives.
+
+**Indexes**
+
+- `ix_product_avoided_ingredients_risk` (GIN) → the same query shape as the
+  allergen screen, over the whole inventory before every suggestion.
 
 ---
 

@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_valid
 from chaudron.domain.models import (
     AgeBand,
     Allergen,
+    AvoidedIngredient,
     Diet,
     InfantTexture,
     MachineTokenScope,
@@ -381,6 +382,12 @@ MAX_FREE_TEXT: Final = 500
 #: and bounded all the same, because the list becomes an ``IN`` clause.
 MAX_MEMBER_FILTERS: Final = 32
 
+#: The whole vocabulary, which is the only bound that means anything: a member
+#: avoiding every entry is a member who eats nothing, and the check constraint
+#: ``ck_household_person_avoided_ingredients_wellformed`` says the same in the
+#: database. Derived from the enum so the two cannot drift apart.
+MAX_AVOIDED_INGREDIENTS: Final = len(AvoidedIngredient)
+
 
 class MemberRefOut(BaseModel):
     """A member as the suggestion response names them: an id and a display name.
@@ -400,6 +407,10 @@ class MemberOut(BaseModel):
     age_band: AgeBand
     diet: Diet
     allergens: list[Allergen]
+    #: Returned under its own name, never merged into ``allergens``. The client
+    #: has to be able to render the two lists with different wording, and it can
+    #: only do that if the wire keeps them apart.
+    avoided_ingredients: list[AvoidedIngredient]
     #: ``""`` rather than ``null`` when unset: the field is a text input on the
     #: other side, and a client that has to handle both writes one of them wrong.
     free_text_restrictions: str
@@ -416,12 +427,24 @@ class MemberIn(StrictModel):
     to ``free_text_restrictions``, because no catalogue column says which
     products contain it and a filter that cannot be computed must not look like
     one (contract 4).
+
+    ``avoided_ingredients`` is the third answer between those two, and it is a
+    *separate field* rather than an extension of either. It is a filter, so it
+    is a closed vocabulary: the catalogue column it reads carries every entry of
+    that vocabulary when a product's ingredient list could not be parsed, and
+    that guarantee only holds because the client cannot invent a value. But the
+    evidence behind it is Open Food Facts' ingredient parsing rather than a
+    regulated declaration, so it never travels in the same list as an allergen.
     """
 
     display_name: Annotated[str, Field(min_length=1, max_length=MAX_MEMBER_NAME)]
     age_band: AgeBand = AgeBand.ADULT
     diet: Diet = Diet.OMNIVORE
     allergens: Annotated[list[Allergen], Field(default_factory=list, max_length=14)]
+    avoided_ingredients: Annotated[
+        list[AvoidedIngredient],
+        Field(default_factory=list, max_length=MAX_AVOIDED_INGREDIENTS),
+    ]
     free_text_restrictions: Annotated[str, Field(default="", max_length=MAX_FREE_TEXT)]
     infant_texture: InfantTexture | None = None
 
@@ -438,6 +461,10 @@ class MemberPatchIn(StrictModel):
     age_band: AgeBand | None = None
     diet: Diet | None = None
     allergens: Annotated[list[Allergen] | None, Field(default=None, max_length=14)]
+    avoided_ingredients: Annotated[
+        list[AvoidedIngredient] | None,
+        Field(default=None, max_length=MAX_AVOIDED_INGREDIENTS),
+    ]
     free_text_restrictions: Annotated[str | None, Field(default=None, max_length=MAX_FREE_TEXT)]
     infant_texture: InfantTexture | None = None
 
@@ -558,6 +585,10 @@ class AppliedConstraintsOut(BaseModel):
 
     members: list[MemberRefOut]
     excluded_allergens: list[Allergen]
+    #: Reported beside the allergens and never inside them: a household reading
+    #: back what the server applied must be able to tell the guarantee from the
+    #: best effort.
+    avoided_ingredients: list[AvoidedIngredient]
     diet: Diet | None
     infant_texture: InfantTexture | None
     age_bands: list[AgeBand]

@@ -1,9 +1,10 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { describeError } from '../../api/client';
-import { ALLERGEN_CODES } from '../../api/types';
+import { ALLERGEN_CODES, AVOIDED_INGREDIENT_CODES } from '../../api/types';
 import type {
   AgeBand,
   AllergenCode,
+  AvoidedIngredientCode,
   Diet,
   HouseholdMember,
   InfantTexture,
@@ -11,11 +12,16 @@ import type {
 } from '../../api/types';
 import { Button, Callout, Checkbox, ClassTag, Field, Fieldset } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
-import { AllergenDisclaimer, InfantDisclaimer } from '../../components/SafetyNotice';
+import {
+  AllergenDisclaimer,
+  AvoidedIngredientDisclaimer,
+  InfantDisclaimer,
+} from '../../components/SafetyNotice';
 import {
   AGE_BANDS,
   AGE_BAND_LABELS,
   ALLERGEN_LABELS,
+  AVOIDED_INGREDIENT_LABELS,
   DIETS,
   DIET_LABELS,
   TEXTURES,
@@ -46,6 +52,9 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
   const [ageBand, setAgeBand] = useState<AgeBand>(member?.age_band ?? 'adult');
   const [diet, setDiet] = useState<Diet>(member?.diet ?? 'omnivore');
   const [allergens, setAllergens] = useState<AllergenCode[]>(member?.allergens ?? []);
+  const [avoided, setAvoided] = useState<AvoidedIngredientCode[]>(
+    member?.avoided_ingredients ?? [],
+  );
   const [texture, setTexture] = useState<InfantTexture>(member?.infant_texture ?? 'smooth');
   const [freeText, setFreeText] = useState(member?.free_text_restrictions ?? '');
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -60,6 +69,16 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
     () => detectAllergenTerms(freeText).filter((code) => !allergens.includes(code)),
     [freeText, allergens],
   );
+
+  // Kept in vocabulary order rather than tick order, like the allergens above:
+  // two households editing the same member must read the same list back.
+  const toggleAvoided = (code: AvoidedIngredientCode, checked: boolean) => {
+    setAvoided((current) =>
+      checked
+        ? AVOIDED_INGREDIENT_CODES.filter((value) => value === code || current.includes(value))
+        : current.filter((value) => value !== code),
+    );
+  };
 
   const toggleAllergen = (code: AllergenCode, checked: boolean) => {
     setAllergens((current) =>
@@ -83,6 +102,7 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
       age_band: ageBand,
       diet,
       allergens,
+      avoided_ingredients: avoided,
       free_text_restrictions: freeText.trim().slice(0, FREE_TEXT_MAX),
       // The contract 422s on an infant band without a texture, and on a texture
       // without an infant band. Enforced here so the server never has to.
@@ -218,16 +238,46 @@ export function MemberForm({ member, onSubmit, onCancel }: Props) {
         </div>
       </Fieldset>
 
+      <AvoidedIngredientDisclaimer />
+
+      <Fieldset
+        legend="Aliments à éviter"
+        hint={
+          <>
+            <ClassTag kind="filter" /> Appliqué comme filtre, sur la liste d’ingrédients publiée par
+            Open Food Facts. Un produit dont la liste est absente ou illisible est retiré lui aussi
+            — c’est ce qui rend ce filtre prudent, et c’est aussi pourquoi il en retire beaucoup. Ce
+            n’est <strong>pas</strong> une déclaration réglementaire : pour une allergie, utilisez
+            la liste ci-dessus.
+          </>
+        }
+      >
+        <div className={styles.allergenGrid}>
+          {AVOIDED_INGREDIENT_CODES.map((code) => (
+            <Checkbox
+              key={code}
+              checked={avoided.includes(code)}
+              onChange={(checked) => {
+                toggleAvoided(code, checked);
+              }}
+            >
+              {AVOIDED_INGREDIENT_LABELS[code]}
+            </Checkbox>
+          ))}
+        </div>
+      </Fieldset>
+
       <Field
         label="Autres restrictions"
-        hint="Par exemple : pas de coriandre, pas trop épicé, intolérance au lactose."
+        hint="Par exemple : pas trop épicé, intolérance au lactose, peu de sel."
       >
         {({ id, describedBy }) => (
           <>
             <p className={styles.preferenceNote}>
               <ClassTag kind="preference" /> Ce texte est transmis au modèle comme préférence. Il
               n’est <strong>pas</strong> appliqué comme filtre : Chaudron ne sait pas quels produits
-              contiennent de la coriandre. N’y mettez pas un allergène — cochez la case.
+              sont « trop épicés ». N’y mettez ni un allergène, ni un aliment de la liste ci-dessus
+              — cochez la case, sinon rien n’est filtré.
             </p>
             <textarea
               id={id}

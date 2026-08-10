@@ -1,13 +1,13 @@
 import styles from './SafetyNotice.module.css';
 
 /**
- * The two standing warnings of ADR-0009.
+ * The three standing warnings of ADR-0009.
  *
- * Neither can be dismissed, and neither remembers anything: there is no close
- * button, no "do not show again", no persisted flag. A warning that can be
- * turned off is read once, by the person who set the app up, and never by the
- * grandparent cooking on a Sunday. They are rendered wherever the matching
- * information is entered or displayed, every time.
+ * None can be dismissed, and none remembers anything: there is no close button,
+ * no "do not show again", no persisted flag. A warning that can be turned off is
+ * read once, by the person who set the app up, and never by the grandparent
+ * cooking on a Sunday. They are rendered wherever the matching information is
+ * entered or displayed, every time.
  */
 
 export function AllergenDisclaimer() {
@@ -23,6 +23,40 @@ export function AllergenDisclaimer() {
         Elles viennent d’Open Food Facts — un wiki alimenté par la communauté — et de ce que vous
         saisissez ici. Un produit peut n’avoir aucune donnée, ou une donnée fausse. En cas
         d’allergie sévère, lisez l’emballage : Chaudron ne remplace pas cette lecture.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The one that has to sit *between* the two lists on the member form.
+ *
+ * Both lists are applied the same way — the product is removed from the
+ * inventory before the model is asked anything — so nothing on screen
+ * distinguishes them by behaviour. What distinguishes them is what stands behind
+ * a product that says nothing: for an allergen, a manufacturer who was legally
+ * obliged to declare it, so silence is a claim; for an ingredient, Open Food
+ * Facts having parsed a word, so silence is silence. Without this paragraph, a
+ * household that has ticked "Kiwi" and seen it work would be entitled to tick
+ * "Arachides" in the same list and expect the same thing — and the two are not
+ * the same thing.
+ */
+export function AvoidedIngredientDisclaimer() {
+  return (
+    <div className={styles.notice} role="note">
+      <p className={styles.title}>
+        <span className={styles.glyph} aria-hidden="true">
+          !
+        </span>
+        Ces exclusions sont au mieux, pas une garantie
+      </p>
+      <p>
+        Chaudron retire de l’inventaire les produits dont la liste d’ingrédients nomme l’aliment
+        coché, <strong>et</strong> tous ceux dont la liste est absente ou illisible — donc aussi les
+        fruits et légumes frais, qui n’en ont presque jamais. Vous verrez donc moins de suggestions.
+        Mais une liste d’ingrédients peut être incomplète ou fausse : c’est un wiki. Pour une
+        allergie, cochez la case correspondante au-dessus — c’est la liste réglementaire, et ce
+        n’est pas la même chose.
       </p>
     </div>
   );

@@ -307,6 +307,7 @@ def _to_out(result: SuggestionSet) -> SuggestRecipesOut:
                 for member_id, display_name in applied.members
             ],
             excluded_allergens=list(applied.excluded_allergens),
+            avoided_ingredients=list(applied.avoided_ingredients),
             diet=applied.diet,
             infant_texture=applied.infant_texture,
             age_bands=list(applied.age_bands),

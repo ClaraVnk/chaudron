@@ -61,7 +61,7 @@ from typing import Final
 #:
 #: **Bump this in the same commit as a new migration.**
 #: ``tests/infra/test_schema_revision.py`` fails otherwise, which is the point.
-REQUIRED_SCHEMA_REVISION: Final = "0027"
+REQUIRED_SCHEMA_REVISION: Final = "0028"
 
 
 class SchemaRevisionState(StrEnum):

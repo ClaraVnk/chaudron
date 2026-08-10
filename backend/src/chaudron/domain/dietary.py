@@ -6,11 +6,17 @@ infant restrictions and the allergen normalisation be tested exhaustively for
 the price of a list comprehension, and what keeps the one piece of the product
 with physical consequences out of reach of a mock.
 
-Three things live here and nowhere else.
+Four things live here and nowhere else.
 
 *The mapping from Open Food Facts tags to the fourteen regulated allergens.*
 Verified against the live taxonomy rather than copied from the API contract --
 see :data:`_ALLERGEN_BY_TAG` for what that verification actually turned up.
+
+*The mapping from its ingredient tags to the avoidable ingredients*, verified
+the same way and against a different taxonomy, which is how ``en:kiwi`` turned
+out to be an allergen tag and ``en:kiwifruit`` the ingredient one. Kept beside
+the allergen mapping so the difference in what the two license is visible in one
+file, and never merged with it.
 
 *The PNNS benchmarks and the infant restrictions*, as data. They are seeded into
 reference tables by an Alembic migration, and the tables are the runtime source
@@ -41,7 +47,9 @@ from chaudron.domain.models import (
     AgeBand,
     Allergen,
     AllergenDataState,
+    AvoidedIngredient,
     InfantRiskKind,
+    IngredientDataState,
     PnnsDirection,
     PnnsMarker,
     PnnsUnit,
@@ -49,6 +57,7 @@ from chaudron.domain.models import (
 
 __all__ = [
     "ALLERGEN_TAGS",
+    "AVOIDED_INGREDIENT_TAGS",
     "INFANT_AGE_BANDS",
     "INFANT_RESTRICTIONS",
     "PNNS_2019",
@@ -56,10 +65,12 @@ __all__ = [
     "AllergenAssessment",
     "AllergenPresence",
     "InfantRestrictionSpec",
+    "IngredientAssessment",
     "NutritionReferenceSpec",
     "PnnsGuidelineSpec",
     "allergen_presence",
     "assess_allergens",
+    "assess_ingredients",
     "markers_for_categories",
 ]
 
@@ -292,6 +303,170 @@ def allergen_presence(
     if allergen in may_contain:
         return AllergenPresence.MAY_CONTAIN
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Open Food Facts ingredient tags
+# --------------------------------------------------------------------------- #
+#
+# Checked against the live taxonomy on 2026-08-10:
+#   https://static.openfoodfacts.org/data/taxonomies/ingredients.json
+#
+# Four findings, each of which changes the code below.
+#
+# 1. **The ingredient taxonomy is a tree, and `ingredients_tags` carries the
+#    ancestors.** Nutella (`3017620422003`) comes back with
+#    `["en:hazelnut","en:nut","en:tree-nut",...]` for one ingredient. So matching
+#    a *parent* entry catches every variety underneath it for free: `en:onion`
+#    is reached from `en:onion-powder`, `en:alcohol` from `en:wine`,
+#    `en:citrus-fruit` from all eighteen of its children. Every tag below was
+#    chosen at the level a household would name.
+# 2. **The obvious tag for kiwi does not exist here.** `en:kiwi` is an entry of
+#    the *allergens* taxonomy (it is regulated in Japan, hence its presence in
+#    `_OUT_OF_SCOPE_TAGS` above); the ingredient entry is `en:kiwifruit`, whose
+#    French name is "kiwi". Copying the allergen tag would have produced a
+#    filter that silently matched nothing, on the first example anybody tests.
+# 3. **Unresolved ingredients are kept verbatim, spaces and all.** Product
+#    `3017624010701` publishes `["de:sugar","de:palm oil","de:hazelnuts",...]`:
+#    the parser failed on every line, and what is stored is the raw text with a
+#    language prefix. A canonical entry is always a slug, so a tag carrying
+#    whitespace is by construction one nobody resolved.
+# 4. **Olive oil is not a child of olive**, and no amount of tree-walking makes
+#    it one. That is a real gap rather than a quirk: it is why the pantry-staple
+#    table declares its own avoided ingredients (`domain/constraints.py`).
+
+#: The canonical Open Food Facts ingredient tag for each avoidable ingredient.
+AVOIDED_INGREDIENT_TAGS: Final[Mapping[AvoidedIngredient, str]] = {
+    AvoidedIngredient.KIWI: "en:kiwifruit",
+    AvoidedIngredient.STRAWBERRY: "en:strawberry",
+    AvoidedIngredient.BANANA: "en:banana",
+    AvoidedIngredient.PEACH: "en:peach",
+    AvoidedIngredient.APRICOT: "en:apricot",
+    AvoidedIngredient.PINEAPPLE: "en:pineapple",
+    AvoidedIngredient.MELON: "en:melon",
+    AvoidedIngredient.AVOCADO: "en:avocado",
+    AvoidedIngredient.COCONUT: "en:coconut",
+    AvoidedIngredient.CITRUS: "en:citrus-fruit",
+    AvoidedIngredient.GRAPE: "en:grape",
+    AvoidedIngredient.TOMATO: "en:tomato",
+    AvoidedIngredient.ONION: "en:onion",
+    AvoidedIngredient.GARLIC: "en:garlic",
+    AvoidedIngredient.MUSHROOM: "en:mushroom",
+    AvoidedIngredient.BELL_PEPPER: "en:bell-pepper",
+    AvoidedIngredient.AUBERGINE: "en:aubergine",
+    AvoidedIngredient.COURGETTE: "en:courgette",
+    AvoidedIngredient.OLIVE: "en:olive",
+    AvoidedIngredient.CUCUMBER: "en:cucumber",
+    AvoidedIngredient.CABBAGE: "en:cabbage",
+    AvoidedIngredient.SPINACH: "en:spinach",
+    AvoidedIngredient.CORIANDER: "en:coriander",
+    AvoidedIngredient.MINT: "en:mint",
+    AvoidedIngredient.CINNAMON: "en:cinnamon",
+    AvoidedIngredient.GINGER: "en:ginger",
+    AvoidedIngredient.CHILLI: "en:chili-pepper",
+    AvoidedIngredient.HONEY: "en:honey",
+    AvoidedIngredient.PORK: "en:pork",
+    AvoidedIngredient.ALCOHOL: "en:alcohol",
+}
+
+_AVOIDED_BY_TAG: Final[Mapping[str, AvoidedIngredient]] = {
+    tag: ingredient for ingredient, tag in AVOIDED_INGREDIENT_TAGS.items()
+}
+
+#: How many tags one ingredient list may carry before the record is treated as
+#: unreadable. Real lists with the hierarchy expanded run to a few dozen; past
+#: this, what arrived is not an ingredient list, and the array is about to be
+#: stored in a table every household reads.
+_MAX_INGREDIENT_TAGS: Final = 400
+
+
+@dataclass(frozen=True, slots=True)
+class IngredientAssessment:
+    """What an upstream record's ingredient list says about the avoidable foods.
+
+    ``state`` carries the same asymmetry as :class:`AllergenAssessment`, over
+    weaker evidence. ``DECLARED`` licenses "the parsed list does not name it";
+    it does **not** license "this product does not contain it", and no wording
+    built from this dataclass may say otherwise.
+    """
+
+    state: IngredientDataState
+    #: Empty whenever ``state`` is ``UNKNOWN``, by construction rather than by
+    #: convention -- ``ck_product_ingredient_unknown_is_empty`` refuses the row
+    #: otherwise, and a caller assembling the two by hand would eventually get
+    #: it wrong in the direction that reads as safe.
+    named: tuple[AvoidedIngredient, ...] = ()
+    #: The tags as they arrived, canonical or not. Stored as evidence.
+    tags: tuple[str, ...] = ()
+    #: Tags that are not canonical taxonomy entries. Their presence is what
+    #: forced ``state`` back to ``UNKNOWN``; a rising count here means Open Food
+    #: Facts' own ingredient parsing is failing on this catalogue's products,
+    #: which is worth knowing before blaming the filter.
+    unreadable_tags: tuple[str, ...] = ()
+
+
+def _is_canonical(tag: str) -> bool:
+    """Whether a tag is a taxonomy entry rather than text nobody could resolve.
+
+    Two conditions, both observed rather than assumed. A resolved entry is
+    always published in English -- the taxonomy has one id per concept and it is
+    ``en:``-prefixed -- and it is always a slug, so a tag carrying whitespace is
+    raw text a contributor typed (``de:palm oil``).
+
+    It is a shape test and not a membership test, and the residual is worth
+    stating: an English word Open Food Facts failed to resolve comes back as
+    ``en:someword``, which passes here. Closing that would mean shipping all
+    6,484 taxonomy ids and a process to refresh them, for a case that costs an
+    over-permissive *ingredient* filter and never touches an allergen.
+    """
+    return tag.startswith("en:") and not any(char.isspace() for char in tag)
+
+
+def assess_ingredients(payload: Mapping[str, object]) -> IngredientAssessment:
+    """Read ``ingredients_tags`` off an Open Food Facts product.
+
+    Two rules, both of which fail towards withholding food rather than serving
+    it, and both lifted from :func:`assess_allergens` on purpose -- a second
+    reading of "what counts as no data" would disagree with the first.
+
+    *No field means no data.* A product whose record carries no ingredient list,
+    or an empty one, comes back ``UNKNOWN``. This is the majority case for the
+    foods this feature was asked about: whole fruit is sold loose or in a punnet
+    nobody has documented, and a product typed in by hand has no upstream record
+    at all.
+
+    *A list we cannot fully read is not a list.* One unresolved tag sends the
+    whole assessment back to ``UNKNOWN``. The cost is over-exclusion -- a
+    household avoiding kiwi loses suggestions built on products whose ingredient
+    text Open Food Facts could not parse -- and the alternative is to certify
+    "no kiwi named" from a list one line of which reads ``de:palm oil``, which is
+    a sentence about a list we did not read.
+    """
+    tags = _normalise(payload.get("ingredients_tags"))
+    if tags is None:
+        return IngredientAssessment(state=IngredientDataState.UNKNOWN)
+    if len(tags) > _MAX_INGREDIENT_TAGS:
+        return IngredientAssessment(
+            state=IngredientDataState.UNKNOWN, tags=tuple(tags[:_MAX_INGREDIENT_TAGS])
+        )
+
+    named = {ingredient for tag in tags if (ingredient := _AVOIDED_BY_TAG.get(tag)) is not None}
+    unreadable = {tag for tag in tags if not _is_canonical(tag)}
+    if unreadable:
+        # The resolved entries are deliberately dropped rather than carried
+        # alongside the `unknown` state: the risk column already answers "every
+        # avoidable ingredient" for this row, and a half-filled list next to it
+        # is the narrower answer somebody reads by mistake.
+        return IngredientAssessment(
+            state=IngredientDataState.UNKNOWN,
+            tags=tuple(tags),
+            unreadable_tags=tuple(sorted(unreadable)),
+        )
+    return IngredientAssessment(
+        state=IngredientDataState.DECLARED,
+        named=tuple(sorted(named)),
+        tags=tuple(tags),
+    )
 
 
 # --------------------------------------------------------------------------- #
