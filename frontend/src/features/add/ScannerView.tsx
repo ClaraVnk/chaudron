@@ -297,6 +297,37 @@ export function ScannerView({ onDetected, onManualEntry, onCancel }: Props) {
     void tick();
   }, [onDetected, pause, release]);
 
+  /**
+   * Resume automatically when the camera is *already* on, and never otherwise.
+   *
+   * The gate below — "elle ne démarre que sur votre demande" — exists so that
+   * opening this screen never opens the camera. That property is kept exactly:
+   * this effect starts nothing unless `sharedStream` is already live, which can
+   * only be true because the household activated it themselves moments ago and
+   * the add flow unmounted this component between two products.
+   *
+   * Without it, keeping the stream alive fixed the wrong half of the problem.
+   * The cold start was gone — no permission prompt, no autofocus — but the tap
+   * on "Activer la caméra" was still there, once per product, which is what
+   * "il faut à chaque fois redémarrer la caméra" actually describes. Twenty
+   * items is twenty taps on a button whose stated purpose is consent that was
+   * already given and has not been withdrawn.
+   *
+   * A cold start still requires the tap. Cancelling, or letting the 90-second
+   * timer run out, ends the stream and puts the gate back.
+   */
+  useEffect(() => {
+    if (phase !== 'idle' || !isLive(sharedStream)) return;
+    // `react-hooks/set-state-in-effect` is disabled here rather than worked
+    // around, because this is the case effects exist for: a `MediaStream` is
+    // state living outside React, and reattaching it is synchronising with it.
+    // The alternatives are worse — deriving the phase at `useState` time cannot
+    // attach anything to a `<video>` that does not exist yet, and doing it in a
+    // click handler is the tap being removed.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void start();
+  }, [phase, start]);
+
   const toggleTorch = useCallback(() => {
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;

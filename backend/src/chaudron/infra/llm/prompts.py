@@ -95,7 +95,8 @@ MAX_LINE_CHARS: Final = 200
 #: Stable prefix. Never interpolate anything here -- not a date, not a household
 #: name, not a model id. Every byte of it is the cache key.
 RECIPE_SYSTEM_PROMPT: Final = (
-    "You plan home meals from what a household already owns.\n"
+    "You plan home cooking from what a household already owns: meals by default, "
+    "and baking when the user turn asks for it.\n"
     "\n"
     "Rules:\n"
     "- Prefer recipes that use items closest to their expiry date.\n"
@@ -298,6 +299,18 @@ def recipe_user_prompt(request: RecipeRequest, inventory: tuple[InventoryItem, .
     if request.meal_temperature != "any":
         temperature = sanitize(request.meal_temperature, limit=16)
         lines.append(f"Preferred serving temperature: {temperature}")
+    if request.dish_kind == "pastry":
+        lines.append(
+            "The household wants baking: a pastry, a cake, a dessert or a bread. "
+            "Quantities matter more here than anywhere else in this application — a "
+            "stew tolerates roughly enough onion and a cake does not tolerate roughly "
+            "enough flour — so propose nothing the inventory below cannot actually "
+            "complete, and say the amounts precisely. If the stock is short of a "
+            "structural ingredient (flour, egg, fat, sugar or a raising agent), say so "
+            "instead of scaling the recipe down until it stops working."
+        )
+    elif request.dish_kind == "savoury":
+        lines.append("The household wants a savoury dish rather than baking.")
     if request.infant_texture is not None:
         lines.append(
             "A young child eats this meal. Required texture: "

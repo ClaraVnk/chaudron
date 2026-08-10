@@ -9,8 +9,10 @@ import type {
   StorageLocation,
 } from '../../api/types';
 import { Button, Callout, Field } from '../../components/ui';
+import { ExpiryDateInput } from '../../components/ExpiryDateInput';
 import { controlClass } from '../../components/controlClass';
 import { hasValidGtinChecksum, isPlausibleGtin, normaliseGtin } from '../../lib/gtin';
+import { readLastLocationId, writeLastLocationId } from '../../lib/preferences';
 import { normaliseAmount } from '../../lib/quantity';
 import { unitOptions } from '../../lib/units';
 import styles from './Add.module.css';
@@ -54,7 +56,17 @@ export function ManualItemForm({ draft, locations, onSaved, onCancel }: Props) {
   const [name, setName] = useState(draft.product?.name ?? '');
   const [brand, setBrand] = useState(draft.product?.brand ?? '');
   const [gtin, setGtin] = useState(draft.gtin ?? draft.product?.gtin ?? '');
-  const [locationId, setLocationId] = useState(locations[0]?.id ?? '');
+  // Not `locations[0]`: that is the first row by sort order, which for a
+  // household whose freezer sorts first meant every item landed in the freezer
+  // — and freezing suspends the expiry date, so a wrong default is not merely
+  // tedious. The previous choice is a far better prior; groceries are put away
+  // in runs. Falls back to the first location when nothing is remembered, or
+  // when what was remembered has since been archived.
+  const [locationId, setLocationId] = useState(() => {
+    const remembered = readLastLocationId();
+    const known = remembered !== null && locations.some((entry) => entry.id === remembered);
+    return known ? remembered : (locations[0]?.id ?? '');
+  });
   const [amount, setAmount] = useState('1');
   const [unit, setUnit] = useState('piece');
   const [expiresOn, setExpiresOn] = useState('');
@@ -113,6 +125,10 @@ export function ManualItemForm({ draft, locations, onSaved, onCancel }: Props) {
     setSaving(true);
     createInventoryItem(body)
       .then((item) => {
+        // Remembered only on success: a location that was refused is not a
+        // choice the household made, and offering it again next time would
+        // repeat the mistake rather than the intent.
+        if (locationId !== '') writeLastLocationId(locationId);
         onSaved(item.product.name);
       })
       .catch((cause: unknown) => {
@@ -274,15 +290,11 @@ export function ManualItemForm({ draft, locations, onSaved, onCancel }: Props) {
 
         <Field label="Date de péremption" hint="Facultatif.">
           {({ id, describedBy }) => (
-            <input
+            <ExpiryDateInput
               id={id}
-              aria-describedby={describedBy}
-              className={controlClass()}
-              type="date"
+              describedBy={describedBy}
               value={expiresOn}
-              onChange={(event) => {
-                setExpiresOn(event.target.value);
-              }}
+              onChange={setExpiresOn}
             />
           )}
         </Field>

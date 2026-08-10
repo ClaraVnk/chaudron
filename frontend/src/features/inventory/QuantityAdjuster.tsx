@@ -1,7 +1,12 @@
 import { useId, useState } from 'react';
 import { describeError } from '../../api/client';
 import { updateInventoryItem } from '../../api/endpoints';
-import type { InventoryItem, UpdatedInventoryItem } from '../../api/types';
+import type {
+  InventoryItem,
+  InventoryItemPatch,
+  StorageLocation,
+  UpdatedInventoryItem,
+} from '../../api/types';
 import { Button } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
 import { formatAmount } from '../../lib/expiry';
@@ -11,6 +16,8 @@ import styles from './Inventory.module.css';
 
 interface Props {
   item: InventoryItem;
+  /** Every active location, so a lot filed in the wrong one can be moved. */
+  locations: StorageLocation[];
   onSaved: (item: UpdatedInventoryItem) => void;
   onCancel: () => void;
 }
@@ -25,11 +32,16 @@ interface Props {
  * impossible for a conversion to slip in: someone who typed "1 L" reads back
  * "1 L", never "1000 ml" (contract v1.1 §6).
  */
-export function QuantityAdjuster({ item, onSaved, onCancel }: Props) {
+export function QuantityAdjuster({ item, locations, onSaved, onCancel }: Props) {
   const inputId = useId();
   const hintId = `${inputId}-hint`;
   const errorId = `${inputId}-error`;
   const [value, setValue] = useState(formatAmount(item.quantity.amount));
+  // A lot filed in the wrong place had no way back: the row offered quantity,
+  // freezing and removal, and `PATCH` accepted a location the whole time. A
+  // wrong location is not cosmetic — the freezer suspends the expiry date, so
+  // an item put there by mistake stops being counted as perishable.
+  const [locationId, setLocationId] = useState(item.location?.id ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -50,7 +62,14 @@ export function QuantityAdjuster({ item, onSaved, onCancel }: Props) {
 
     setSaving(true);
     setError(null);
-    updateInventoryItem(item.id, { amount })
+    // Only what changed. Sending an unchanged location would be harmless today
+    // and is still wrong: a PATCH that names a field claims the user set it,
+    // and the server's audit trail reads it that way.
+    const patch: InventoryItemPatch = { amount };
+    if (locationId !== '' && locationId !== (item.location?.id ?? '')) {
+      patch.location_id = locationId;
+    }
+    updateInventoryItem(item.id, patch)
       .then(onSaved)
       .catch((cause: unknown) => {
         setError(describeError(cause));
@@ -80,6 +99,28 @@ export function QuantityAdjuster({ item, onSaved, onCancel }: Props) {
           Un quart
         </Button>
       </div>
+
+      {locations.length > 1 ? (
+        <div className={styles.adjusterField}>
+          <label className={styles.adjusterLabel} htmlFor={`${inputId}-location`}>
+            Emplacement
+          </label>
+          <select
+            id={`${inputId}-location`}
+            className={controlClass()}
+            value={locationId}
+            onChange={(event) => {
+              setLocationId(event.target.value);
+            }}
+          >
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       <div className={styles.adjusterRow}>
         <Button

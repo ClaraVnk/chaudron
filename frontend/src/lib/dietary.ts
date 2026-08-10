@@ -8,6 +8,7 @@ import type {
   AgeBand,
   AllergenCode,
   Diet,
+  DishKind,
   HouseholdMember,
   InfantTexture,
   MealTemperature,
@@ -58,6 +59,12 @@ export const MEAL_TEMPERATURE_LABELS: Record<MealTemperature, string> = {
   any: 'Indifférent',
   hot: 'Plutôt chaud',
   cold: 'Plutôt froid',
+};
+
+export const DISH_KIND_LABELS: Record<DishKind, string> = {
+  any: 'Indifférent',
+  savoury: 'Salé',
+  pastry: 'Pâtisserie',
 };
 
 export const SERVING_TEMPERATURE_LABELS: Record<ServingTemperature, string> = {

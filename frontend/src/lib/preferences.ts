@@ -44,3 +44,44 @@ export function writeMealTemperature(value: MealTemperature): void {
     /* ignored, see above */
   }
 }
+
+const LOCATION_KEY = 'chaudron.last-location';
+
+function locationStorageKey(): string | null {
+  const householdId = getActiveHouseholdId();
+  return householdId === null ? null : `${LOCATION_KEY}.${householdId}`;
+}
+
+/**
+ * The location the household last put something in.
+ *
+ * The add form used to default to `locations[0]`, which is the first row by
+ * sort order and has nothing to do with what anybody is holding. For a
+ * household whose freezer happens to sort first, that meant every item landed
+ * in the freezer unless corrected — twenty times per shopping trip, and a
+ * mistake that also suspends the expiry date, so it is not merely tedious.
+ *
+ * Remembering the last choice is not a guess about intent: groceries are put
+ * away in runs, and the previous answer is a far better prior than an arbitrary
+ * row. The caller still falls back to the first location when there is nothing
+ * remembered, or when what was remembered has since been archived.
+ */
+export function readLastLocationId(): string | null {
+  const key = locationStorageKey();
+  if (key === null) return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeLastLocationId(id: string): void {
+  const key = locationStorageKey();
+  if (key === null) return;
+  try {
+    window.localStorage.setItem(key, id);
+  } catch {
+    /* ignored, see above */
+  }
+}

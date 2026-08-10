@@ -5,6 +5,7 @@ import type {
   FrozenInventoryItem,
   InventoryItem,
   RemovalReason,
+  StorageLocation,
   UpdatedInventoryItem,
 } from '../../api/types';
 import { Badge, Button } from '../../components/ui';
@@ -21,6 +22,8 @@ import styles from './Inventory.module.css';
 
 interface Props {
   item: InventoryItem;
+  /** Forwarded to the adjuster so a misfiled lot can be moved. */
+  locations: StorageLocation[];
   onRemove: (id: string, reason: RemovalReason) => Promise<void>;
   onAdjusted: (item: UpdatedInventoryItem) => void;
   onFrozen: (item: FrozenInventoryItem, message: string) => void;
@@ -52,7 +55,7 @@ function locationSentence(answer: FrozenInventoryItem): string | null {
   }
 }
 
-export function InventoryItemRow({ item, onRemove, onAdjusted, onFrozen }: Props) {
+export function InventoryItemRow({ item, locations, onRemove, onAdjusted, onFrozen }: Props) {
   const [mode, setMode] = useState<Mode>('idle');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -183,6 +186,7 @@ export function InventoryItemRow({ item, onRemove, onAdjusted, onFrozen }: Props
       {mode === 'adjusting' ? (
         <QuantityAdjuster
           item={item}
+          locations={locations}
           onSaved={(updated) => {
             onAdjusted(updated);
             setMode('idle');
