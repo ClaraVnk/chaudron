@@ -15,7 +15,13 @@ import { Badge, Button, Callout, Chip, ChipRow, Field } from '../../components/u
 import { controlClass } from '../../components/controlClass';
 import { useCapabilities } from '../../context/capabilitiesContext';
 import type { MembersState } from '../../hooks/useMembers';
-import { ALLERGEN_LABELS, DIET_LABELS, TEXTURE_LABELS, unionConstraints } from '../../lib/dietary';
+import {
+  ALLERGEN_LABELS,
+  AVOIDED_INGREDIENT_LABELS,
+  DIET_LABELS,
+  TEXTURE_LABELS,
+  unionConstraints,
+} from '../../lib/dietary';
 import { readMealTemperature, writeMealTemperature } from '../../lib/preferences';
 import { BalancePanel } from './BalancePanel';
 import { CookingForPanel } from './CookingForPanel';
@@ -138,6 +144,12 @@ function AppliedConstraintsSummary({ applied }: { applied: AppliedConstraints })
           {applied.excluded_allergens.length === 0
             ? 'aucun'
             : applied.excluded_allergens.map((code) => ALLERGEN_LABELS[code]).join(', ')}
+        </li>
+        <li>
+          <span className={styles.blockLabel}>Aliments évités</span>
+          {applied.avoided_ingredients.length === 0
+            ? 'aucun'
+            : applied.avoided_ingredients.map((code) => AVOIDED_INGREDIENT_LABELS[code]).join(', ')}
         </li>
         <li>
           <span className={styles.blockLabel}>Régime</span>

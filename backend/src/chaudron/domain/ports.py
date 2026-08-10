@@ -26,8 +26,10 @@ from typing import Any, Final, Protocol
 from chaudron.domain.models import (
     Allergen,
     AllergenDataState,
+    AvoidedIngredient,
     ExpiryDateKind,
     FoodFamily,
+    IngredientDataState,
     PnnsMarker,
     ProductSource,
     QuantityDimension,
@@ -41,6 +43,7 @@ __all__ = [
     "UNSET",
     "Allergen",
     "AllergenDataState",
+    "AvoidedIngredient",
     "BarcodeNotFoundError",
     "CatalogRecord",
     "DomainError",
@@ -48,6 +51,7 @@ __all__ = [
     "ExpiryDateKind",
     "FoodFamily",
     "HouseholdRepository",
+    "IngredientDataState",
     "InvalidBarcodeError",
     "InvalidQuantityError",
     "InventoryConflictError",
@@ -605,6 +609,13 @@ class CatalogRecord:
     allergen_state: AllergenDataState = AllergenDataState.UNKNOWN
     allergens_contains: tuple[Allergen, ...] = ()
     allergens_may_contain: tuple[Allergen, ...] = ()
+    #: Same defaults, same reasoning: a record built by a caller that knows
+    #: nothing about ingredients declares nothing, and `UNKNOWN` withholds the
+    #: product from anybody avoiding something rather than clearing it.
+    ingredient_state: IngredientDataState = IngredientDataState.UNKNOWN
+    avoided_ingredients_named: tuple[AvoidedIngredient, ...] = ()
+    #: The raw upstream tags, stored as evidence. Never read by a filter.
+    ingredients_tags: tuple[str, ...] = ()
     #: Empty means *unresolved*, never "belongs to no food group".
     pnns_markers: tuple[PnnsMarker, ...] = ()
     #: ``None`` means unresolved, and unresolved means no expiry date is

@@ -331,6 +331,99 @@ class AllergenDataState(enum.StrEnum):
     DECLARED = "declared"
 
 
+class AvoidedIngredient(enum.StrEnum):
+    """Foods a household chooses to keep off the table, outside the regulated list.
+
+    **This is not a second allergen list, and the schema must never let it look
+    like one.** :class:`Allergen` is closed on a regulation that obliges a
+    manufacturer to declare; this one is closed on a *vocabulary of convenience*,
+    and behind every member there is nothing but Open Food Facts' ingredient
+    parser having managed to resolve a word. A member of this enum supports the
+    sentence "the parsed ingredient list did not name it"; it never supports
+    "this product does not contain it".
+
+    It is closed all the same, and that is the whole reason this can be a filter
+    at all. The safety property below -- a product whose ingredients nobody has
+    parsed carries **every** avoidable ingredient as a risk -- requires the risk
+    set of an undocumented product to be a superset of anything a household can
+    ask for. Over an open vocabulary there is no such set, so free text can only
+    ever be a preference (which is what ``free_text_restrictions`` remains).
+
+    Every member maps to one canonical Open Food Facts ingredient tag in
+    ``domain/dietary.py``, verified against the live taxonomy on 2026-08-10 --
+    which is how ``en:kiwi`` turned out to be the *allergen* tag and
+    ``en:kiwifruit`` the ingredient one. Adding a member is a migration, because
+    the generated column below has to be rewritten to include it; that cost is
+    deliberate, since a member added without it would be silently unfilterable
+    on every product already in the catalogue.
+    """
+
+    # Fruit. The category this feature was asked for, and the one where the
+    # data is thinnest: whole fruit is often sold loose, with no barcode and so
+    # no record to parse at all.
+    KIWI = "kiwi"
+    STRAWBERRY = "strawberry"
+    BANANA = "banana"
+    PEACH = "peach"
+    APRICOT = "apricot"
+    PINEAPPLE = "pineapple"
+    MELON = "melon"
+    AVOCADO = "avocado"
+    COCONUT = "coconut"
+    #: The whole citrus branch rather than orange and lemon separately: the
+    #: taxonomy makes them children of one entry, and somebody who cannot eat
+    #: oranges is not usually fine with grapefruit.
+    CITRUS = "citrus"
+    GRAPE = "grape"
+
+    # Vegetables.
+    TOMATO = "tomato"
+    ONION = "onion"
+    GARLIC = "garlic"
+    MUSHROOM = "mushroom"
+    BELL_PEPPER = "bell_pepper"
+    AUBERGINE = "aubergine"
+    COURGETTE = "courgette"
+    OLIVE = "olive"
+    CUCUMBER = "cucumber"
+    CABBAGE = "cabbage"
+    SPINACH = "spinach"
+
+    # Herbs and spices, where a dislike is strong and common enough to be worth
+    # a filter rather than a sentence in a prompt.
+    CORIANDER = "coriander"
+    MINT = "mint"
+    CINNAMON = "cinnamon"
+    GINGER = "ginger"
+    CHILLI = "chilli"
+
+    # The rest. `PORK` is here and no other meat is, because it is the one
+    # exclusion no `Diet` member expresses; `ALCOHOL` for the same reason.
+    HONEY = "honey"
+    PORK = "pork"
+    ALCOHOL = "alcohol"
+
+
+class IngredientDataState(enum.StrEnum):
+    """Whether a product's ingredient list could be read at all.
+
+    A separate type from :class:`AllergenDataState` even though the two members
+    are spelled the same, because they answer different questions about
+    different upstream fields and a single shared type would invite a filter to
+    read one state and act on the other.
+
+    ``declared`` means Open Food Facts published an ingredient list *and* every
+    tag in it resolved to its canonical taxonomy entry. One unresolved tag sends
+    the record back to ``unknown``, exactly as an unreadable allergen tag does:
+    a list one line of which we cannot read is not a list we may certify. That
+    line is routinely the interesting one -- product ``3017624010701`` publishes
+    six ingredients and all six are unparsed German free text.
+    """
+
+    UNKNOWN = "unknown"
+    DECLARED = "declared"
+
+
 class PnnsMarker(enum.StrEnum):
     """Food groups the weekly balance is expressed in (PNNS, France).
 
@@ -477,6 +570,34 @@ ALL_ALLERGENS_SQL: Final = "'{" + ",".join(member.value for member in Allergen) 
 _ALLERGENS_RISK_SQL: Final = (
     f"CASE WHEN allergen_state = 'unknown' THEN {ALL_ALLERGENS_SQL}"
     " ELSE allergens_contains || allergens_may_contain END"
+)
+
+#: Every avoidable ingredient, as a PostgreSQL array literal. Derived from the
+#: enum for the same reason as :data:`ALL_ALLERGENS_SQL`: the unknown branch
+#: below has to stay a superset of everything a household can ask to avoid, and
+#: a hand-written list would stop being one the first time a member is added.
+ALL_AVOIDED_INGREDIENTS_SQL: Final = (
+    "'{" + ",".join(member.value for member in AvoidedIngredient) + "}'::avoided_ingredient[]"
+)
+
+#: The expression behind ``Product.avoided_ingredients_risk``.
+#:
+#: The same CASE as :data:`_ALLERGENS_RISK_SQL`, and deliberately the same shape
+#: rather than a variation on it: a product whose ingredient list nobody could
+#: parse carries **every** avoidable ingredient, so the obvious filter --
+#: ``NOT (member_avoided && product.avoided_ingredients_risk)`` -- withholds it
+#: without the author of that query having considered the unknown case.
+#:
+#: What differs from the allergen column is not the mechanism but the evidence
+#: behind ``declared``: an allergen absent from a declared record was *asserted*
+#: absent by somebody legally obliged to say so, whereas an ingredient absent
+#: from a parsed list only means the parser did not name it. That difference
+#: belongs in the wording on screen, and it is why this feature is presented as
+#: best effort -- it does not belong in the query, where treating the two the
+#: same way is what keeps both of them safe.
+_AVOIDED_INGREDIENTS_RISK_SQL: Final = (
+    f"CASE WHEN ingredient_state = 'unknown' THEN {ALL_AVOIDED_INGREDIENTS_SQL}"
+    " ELSE avoided_ingredients_named END"
 )
 
 
@@ -912,7 +1033,8 @@ class HouseholdPerson(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
     is you" -- never an access path.
 
     **Everything below the name is health data** (GDPR article 9), and for an
-    infant it is a minor's. ``allergens`` and ``free_text_restrictions`` are
+    infant it is a minor's. ``allergens``, ``avoided_ingredients`` and
+    ``free_text_restrictions`` are
     ``deferred``, exactly as ``LlmProviderConfig.api_key_ciphertext`` is: a plain
     ``select(HouseholdPerson)`` -- resolving a display name for a suggestion, say
     -- does not load them, and the code that legitimately needs them says so with
@@ -963,6 +1085,52 @@ class HouseholdPerson(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
             "through an explicit undefer(), erased with the row."
         ),
     )
+    #: Foods this person keeps off their plate, outside the regulated fourteen.
+    #:
+    #: A **separate column from ``allergens``, and never a widening of it.** The
+    #: two are applied by the same screen and are not worth the same: an
+    #: allergen filter rests on a declaration somebody was obliged by law to
+    #: make, this one on Open Food Facts having managed to parse a word. Merging
+    #: them would give the weaker list the stronger one's authority in the one
+    #: table where that mistake is unrecoverable, so they stay two columns, two
+    #: API fields and two blocks on screen.
+    #:
+    #: Deferred like ``allergens``: "no onion" is a preference, "no onion"
+    #: written by somebody with a FODMAP diagnosis is health data, and this table
+    #: cannot tell them apart -- so it treats both as the latter.
+    #: Whether this person's avoided ingredients use the allergen doctrine —
+    #: an unreadable ingredient list counts as "might contain it".
+    #:
+    #: Measured on 1 263 864 French products before this column existed: 13.2%
+    #: carry a list this parser can read, and 72% of packaged products carry
+    #: none at all. Strict therefore withholds 86.8% of the catalogue, which is
+    #: right for a diagnosis and indistinguishable from a broken inventory for a
+    #: dislike. `false` by default because the *safe* default here is the one
+    #: that keeps working: somebody who ticks kiwi out of distaste and loses
+    #: nine products in ten unticks it and gets no protection at all, whereas
+    #: somebody with a diagnosis is asked, in as many words, on the same screen.
+    avoided_ingredients_strict: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        comment=(
+            "Whether an unreadable ingredient list counts as 'might contain it' for "
+            "this person. True is the doctrine the regulated allergens use and "
+            "withholds ~87% of the French catalogue, measured; false withholds only "
+            "what an ingredient list positively names and reports the rest as "
+            "undocumented. Medical rather than cosmetic, so it is asked and never "
+            "inferred."
+        ),
+    )
+    avoided_ingredients: Mapped[list[AvoidedIngredient]] = mapped_column(
+        ARRAY(pg_enum(AvoidedIngredient, "avoided_ingredient")),
+        deferred=True,
+        server_default=text("'{}'"),
+        comment=(
+            "Best-effort exclusions, applied as a filter but NOT a regulated "
+            "declaration -- see `allergens` for that. Never logged, never sent to "
+            "a model, loaded only through an explicit undefer()."
+        ),
+    )
     infant_texture: Mapped[InfantTexture | None] = mapped_column(
         pg_enum(InfantTexture, "infant_texture"),
         comment="HEALTH DATA of a minor. Hard constraint; NULL outside an infant band.",
@@ -1007,6 +1175,15 @@ class HouseholdPerson(UuidPkMixin, HouseholdScopedMixin, TimestampMixin, Base):
         CheckConstraint(
             "array_position(allergens, NULL) IS NULL AND cardinality(allergens) <= 14",
             name="allergens_wellformed",
+        ),
+        # Same trap, same guard, over a vocabulary that will grow: the ceiling
+        # is rendered from the enum so that a revision adding a member cannot
+        # leave a cardinality nobody can reach. A NULL element here is the more
+        # dangerous half -- it makes every containment test answer "unknown".
+        CheckConstraint(
+            "array_position(avoided_ingredients, NULL) IS NULL"
+            f" AND cardinality(avoided_ingredients) <= {len(AvoidedIngredient)}",
+            name="avoided_ingredients_wellformed",
         ),
         CheckConstraint(
             "free_text_restrictions IS NULL OR char_length(free_text_restrictions) <= 500",
@@ -1355,6 +1532,59 @@ class Product(Base):
         ),
     )
 
+    # ---- Avoided ingredients ---------------------------------------------- #
+    #
+    # The same three-column shape as the allergens above, over a different
+    # upstream field and a vocabulary with no regulation behind it. Kept
+    # visibly separate rather than folded into one "things to avoid" list: the
+    # two carry different evidence, and a schema that merges them makes the
+    # weaker one inherit the stronger one's credibility.
+    ingredient_state: Mapped[IngredientDataState] = mapped_column(
+        pg_enum(IngredientDataState, "ingredient_data_state"),
+        server_default=text("'unknown'"),
+        comment=(
+            "'unknown' means the upstream record published no ingredient list, or "
+            "published one this application could not fully resolve. It never "
+            "means 'contains none of them'."
+        ),
+    )
+    #: The raw Open Food Facts ``ingredients_tags``, kept verbatim.
+    #:
+    #: Evidence rather than a filter input, and never read by the screen. Two
+    #: things need it. A tag this application does not yet understand is the
+    #: reason ``ingredient_state`` fell back to ``unknown``, and it is only
+    #: diagnosable if it was stored. And when the vocabulary above grows, every
+    #: product already in the catalogue can be reclassified from this column --
+    #: the alternative is re-fetching them through an API that allows ten calls
+    #: a minute, which for a real catalogue is measured in days.
+    ingredients_tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text()),
+        server_default=text("'{}'"),
+        comment=(
+            "Raw upstream ingredient taxonomy tags. Evidence and backfill source; "
+            "NOT what a filter reads -- see avoided_ingredients_risk."
+        ),
+    )
+    #: The entries of :class:`AvoidedIngredient` that the parsed list names.
+    #:
+    #: Empty whenever ``ingredient_state`` is ``unknown``, enforced by a check
+    #: constraint: a row that says "unreadable" while listing what it resolved
+    #: would let a reader take the list as the answer.
+    avoided_ingredients_named: Mapped[list[AvoidedIngredient]] = mapped_column(
+        ARRAY(pg_enum(AvoidedIngredient, "avoided_ingredient")), server_default=text("'{}'")
+    )
+    # Generated, exactly like `allergens_risk`, and for exactly the same reason.
+    avoided_ingredients_risk: Mapped[list[AvoidedIngredient]] = mapped_column(
+        ARRAY(pg_enum(AvoidedIngredient, "avoided_ingredient")),
+        Computed(_AVOIDED_INGREDIENTS_RISK_SQL, persisted=True),
+        comment=(
+            "GENERATED. Avoidable ingredients this product cannot be cleared of, "
+            "including every one of them when the ingredient list could not be "
+            "read. The only column a filter should read; avoided_ingredients_named "
+            "alone would treat 'unknown' as safe."
+        ),
+    )
+
     # PNNS food-group markers resolved from the catalogue categories, so the
     # weekly balance can be computed from stock movements alone. An empty array
     # is "unresolved", and the count of unresolved products is exposed to the
@@ -1406,6 +1636,23 @@ class Product(Base):
             " AND array_position(pnns_markers, NULL) IS NULL",
             name="tag_arrays_wellformed",
         ),
+        # The allergen invariant above, restated for the ingredient columns. An
+        # unreadable list that still carries what it resolved is a row whose two
+        # halves contradict each other, and the half a reader consults first
+        # becomes the answer.
+        CheckConstraint(
+            "ingredient_state <> 'unknown' OR cardinality(avoided_ingredients_named) = 0",
+            name="ingredient_unknown_is_empty",
+        ),
+        # Same NULL trap as `tag_arrays_wellformed`, on the two arrays that
+        # revision 0028 added. `ingredients_tags` is deliberately *not* emptied
+        # when the state is unknown -- it is the evidence of the unreadability --
+        # but a NULL element in it would still poison every containment test.
+        CheckConstraint(
+            "array_position(avoided_ingredients_named, NULL) IS NULL"
+            " AND array_position(ingredients_tags, NULL) IS NULL",
+            name="ingredient_arrays_wellformed",
+        ),
         # One barcode, one public product. Also serves the scan lookup.
         Index(
             "uq_product_gtin_global",
@@ -1438,6 +1685,13 @@ class Product(Base):
         # The allergen filter runs over the whole inventory before every
         # suggestion, and `&&` on an array is only cheap with a GIN index.
         Index("ix_product_allergens_risk", "allergens_risk", postgresql_using="gin"),
+        # Same query, same shape, same index: the avoided-ingredient screen runs
+        # over the whole inventory before every suggestion.
+        Index(
+            "ix_product_avoided_ingredients_risk",
+            "avoided_ingredients_risk",
+            postgresql_using="gin",
+        ),
         # "What did this household eat from each food group last week", joined
         # from stock movements.
         Index("ix_product_pnns_markers", "pnns_markers", postgresql_using="gin"),

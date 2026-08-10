@@ -28,6 +28,7 @@ ADULT = {
     "age_band": "adult",
     "diet": "vegetarian",
     "allergens": ["nuts", "celery"],
+    "avoided_ingredients": ["onion", "kiwi"],
     "free_text_restrictions": "pas de coriandre",
     "infant_texture": None,
 }
@@ -37,6 +38,7 @@ INFANT = {
     "age_band": "infant_6_9m",
     "diet": "omnivore",
     "allergens": [],
+    "avoided_ingredients": [],
     "free_text_restrictions": "",
     "infant_texture": "smooth",
 }
@@ -57,10 +59,16 @@ async def test_a_member_is_created_listed_and_read_back_whole(
         "age_band",
         "diet",
         "allergens",
+        "avoided_ingredients",
+        "avoided_ingredients_strict",
         "free_text_restrictions",
         "infant_texture",
     }
     assert body["allergens"] == ["celery", "nuts"], "sorted, so the response is stable"
+    # Its own field on the wire, never merged into `allergens`: one is a
+    # regulated declaration and the other a best-effort match on a wiki's
+    # ingredient parsing, and the client has to render them differently.
+    assert body["avoided_ingredients"] == ["kiwi", "onion"]
     assert body["diet"] == "vegetarian"
     assert body["infant_texture"] is None
 

@@ -126,6 +126,13 @@ class SqlProductRepository:
         product.allergen_state = record.allergen_state
         product.allergens_contains = list(record.allergens_contains)
         product.allergens_may_contain = list(record.allergens_may_contain)
+        # Same wholesale overwrite, and for the same reason: an ingredient list a
+        # contributor has since blanked must stop supporting the claim it used to
+        # support. `avoided_ingredients_named` goes back to empty with it, which
+        # is what `ck_product_ingredient_unknown_is_empty` requires.
+        product.ingredient_state = record.ingredient_state
+        product.avoided_ingredients_named = list(record.avoided_ingredients_named)
+        product.ingredients_tags = list(record.ingredients_tags)
         product.pnns_markers = list(record.pnns_markers)
         product.food_family = record.food_family
         product.source = ProductSource.OPEN_FOOD_FACTS

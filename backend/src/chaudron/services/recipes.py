@@ -81,6 +81,7 @@ from chaudron.domain.models import (
     AgeBand,
     Allergen,
     AllergenDataState,
+    AvoidedIngredient,
     Diet,
     InfantTexture,
     PnnsMarker,
@@ -232,6 +233,10 @@ class AppliedConstraints:
 
     members: tuple[tuple[uuid.UUID, str], ...]
     excluded_allergens: tuple[Allergen, ...]
+    #: Carried separately from the allergens all the way to the screen. The two
+    #: were applied by the same screen and are not worth the same, and a summary
+    #: that merged them would report a best-effort match as a guarantee.
+    avoided_ingredients: tuple[AvoidedIngredient, ...]
     diet: Diet | None
     infant_texture: InfantTexture | None
     age_bands: tuple[AgeBand, ...]
@@ -299,6 +304,13 @@ class RecipeService:
         staples = staples_allowed_for(constraints, rules)
         strict = bool(constraints.excluded_allergens) or constraints.diet is not Diet.OMNIVORE
         strict = strict or bool(rules)
+        # An avoided ingredient makes the post-call check strict for the same
+        # reason an allergy does: the product was removed from the inventory, so
+        # a model that writes "kiwi" anyway is naming something that resolves to
+        # nothing, and only `strict` turns that into a refused suggestion. Left
+        # out, the pre-call screen would be undone by the check that exists to
+        # back it up.
+        strict = strict or bool(constraints.avoided_ingredients)
 
         request = RecipeRequest(
             inventory=tuple(_to_provider_item(line, today) for line in screened.offered),
@@ -729,6 +741,7 @@ def _applied(constraints: HouseholdConstraints, screened: ScreenedStock) -> Appl
     return AppliedConstraints(
         members=tuple((person.id, person.display_name) for person in constraints.members),
         excluded_allergens=tuple(sorted(constraints.excluded_allergens)),
+        avoided_ingredients=tuple(sorted(constraints.avoided_ingredients)),
         diet=constraints.diet if constraints.members else None,
         infant_texture=constraints.infant_texture,
         age_bands=tuple(sorted(constraints.age_bands)),

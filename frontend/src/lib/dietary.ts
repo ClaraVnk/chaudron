@@ -7,6 +7,7 @@
 import type {
   AgeBand,
   AllergenCode,
+  AvoidedIngredientCode,
   Diet,
   DishKind,
   HouseholdMember,
@@ -14,7 +15,7 @@ import type {
   MealTemperature,
   ServingTemperature,
 } from '../api/types';
-import { ALLERGEN_CODES } from '../api/types';
+import { ALLERGEN_CODES, AVOIDED_INGREDIENT_CODES } from '../api/types';
 
 export const ALLERGEN_LABELS: Record<AllergenCode, string> = {
   gluten: 'Céréales contenant du gluten',
@@ -31,6 +32,45 @@ export const ALLERGEN_LABELS: Record<AllergenCode, string> = {
   sulphites: 'Anhydride sulfureux et sulfites',
   lupin: 'Lupin',
   molluscs: 'Mollusques',
+};
+
+/**
+ * Deliberately a second mapping rather than an extension of the one above. The
+ * two lists sit next to each other on screen and the interface has to be able to
+ * say which of them is a regulated declaration and which is a best-effort match;
+ * one merged record would make that sentence impossible to write correctly.
+ */
+export const AVOIDED_INGREDIENT_LABELS: Record<AvoidedIngredientCode, string> = {
+  kiwi: 'Kiwi',
+  strawberry: 'Fraise',
+  banana: 'Banane',
+  peach: 'Pêche',
+  apricot: 'Abricot',
+  pineapple: 'Ananas',
+  melon: 'Melon',
+  avocado: 'Avocat',
+  coconut: 'Noix de coco',
+  citrus: 'Agrumes',
+  grape: 'Raisin',
+  tomato: 'Tomate',
+  onion: 'Oignon',
+  garlic: 'Ail',
+  mushroom: 'Champignon',
+  bell_pepper: 'Poivron',
+  aubergine: 'Aubergine',
+  courgette: 'Courgette',
+  olive: 'Olive',
+  cucumber: 'Concombre',
+  cabbage: 'Chou',
+  spinach: 'Épinard',
+  coriander: 'Coriandre',
+  mint: 'Menthe',
+  cinnamon: 'Cannelle',
+  ginger: 'Gingembre',
+  chilli: 'Piment',
+  honey: 'Miel',
+  pork: 'Porc',
+  alcohol: 'Alcool',
 };
 
 export const DIET_LABELS: Record<Diet, string> = {
@@ -118,6 +158,8 @@ export interface FreeTextPreference {
  */
 export interface UnionConstraints {
   allergens: AllergenCode[];
+  /** Carried beside the allergens, never inside them (see `AVOIDED_INGREDIENT_CODES`). */
+  avoidedIngredients: AvoidedIngredientCode[];
   diet: Diet | null;
   infantTexture: InfantTexture | null;
   ageBands: AgeBand[];
@@ -127,6 +169,7 @@ export interface UnionConstraints {
 
 export function unionConstraints(members: HouseholdMember[]): UnionConstraints {
   const allergens = new Set<AllergenCode>();
+  const avoided = new Set<AvoidedIngredientCode>();
   const ageBands = new Set<AgeBand>();
   const preferences: FreeTextPreference[] = [];
   let diet: Diet | null = null;
@@ -134,6 +177,7 @@ export function unionConstraints(members: HouseholdMember[]): UnionConstraints {
 
   for (const member of members) {
     for (const code of member.allergens) allergens.add(code);
+    for (const code of member.avoided_ingredients) avoided.add(code);
     ageBands.add(member.age_band);
     if (diet === null || DIET_RANK[member.diet] > DIET_RANK[diet]) diet = member.diet;
     if (
@@ -151,6 +195,7 @@ export function unionConstraints(members: HouseholdMember[]): UnionConstraints {
   return {
     // Contract order, so two households never read the same list differently.
     allergens: ALLERGEN_CODES.filter((code) => allergens.has(code)),
+    avoidedIngredients: AVOIDED_INGREDIENT_CODES.filter((code) => avoided.has(code)),
     diet,
     infantTexture: texture,
     ageBands: AGE_BANDS.filter((band) => ageBands.has(band)),

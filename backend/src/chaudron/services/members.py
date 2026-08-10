@@ -30,7 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
 from chaudron.domain.constraints import INFANT_BANDS, Person
-from chaudron.domain.models import AgeBand, Allergen, Diet, HouseholdPerson, InfantTexture
+from chaudron.domain.models import (
+    AgeBand,
+    Allergen,
+    AvoidedIngredient,
+    Diet,
+    HouseholdPerson,
+    InfantTexture,
+)
 from chaudron.domain.ports import (
     UNSET,
     InfantTextureInconsistentError,
@@ -48,6 +55,8 @@ class MemberDraft:
     age_band: AgeBand
     diet: Diet
     allergens: tuple[Allergen, ...]
+    avoided_ingredients: tuple[AvoidedIngredient, ...]
+    avoided_ingredients_strict: bool
     infant_texture: InfantTexture | None
     free_text_restrictions: str | None
 
@@ -60,6 +69,8 @@ class MemberPatch:
     age_band: Maybe[AgeBand] = UNSET
     diet: Maybe[Diet] = UNSET
     allergens: Maybe[tuple[Allergen, ...]] = UNSET
+    avoided_ingredients: Maybe[tuple[AvoidedIngredient, ...]] = UNSET
+    avoided_ingredients_strict: Maybe[bool] = UNSET
     infant_texture: Maybe[InfantTexture | None] = UNSET
     free_text_restrictions: Maybe[str | None] = UNSET
 
@@ -75,6 +86,8 @@ class MemberService:
                 .where(HouseholdPerson.household_id == household_id)
                 .options(
                     undefer(HouseholdPerson.allergens),
+                    undefer(HouseholdPerson.avoided_ingredients),
+                    undefer(HouseholdPerson.avoided_ingredients_strict),
                     undefer(HouseholdPerson.free_text_restrictions),
                 )
                 .order_by(HouseholdPerson.sort_order, HouseholdPerson.display_name)
@@ -90,6 +103,8 @@ class MemberService:
             age_band=draft.age_band,
             diet=draft.diet,
             allergens=list(dict.fromkeys(draft.allergens)),
+            avoided_ingredients=list(dict.fromkeys(draft.avoided_ingredients)),
+            avoided_ingredients_strict=draft.avoided_ingredients_strict,
             infant_texture=draft.infant_texture,
             free_text_restrictions=draft.free_text_restrictions or None,
         )
@@ -113,6 +128,12 @@ class MemberService:
         person.infant_texture = texture
         person.diet = _or_keep(patch.diet, person.diet)
         person.allergens = list(dict.fromkeys(_or_keep(patch.allergens, tuple(person.allergens))))
+        person.avoided_ingredients = list(
+            dict.fromkeys(_or_keep(patch.avoided_ingredients, tuple(person.avoided_ingredients)))
+        )
+        person.avoided_ingredients_strict = _or_keep(
+            patch.avoided_ingredients_strict, person.avoided_ingredients_strict
+        )
         person.free_text_restrictions = (
             _or_keep(patch.free_text_restrictions, person.free_text_restrictions) or None
         )
@@ -134,6 +155,7 @@ class MemberService:
             )
             .options(
                 undefer(HouseholdPerson.allergens),
+                undefer(HouseholdPerson.avoided_ingredients),
                 undefer(HouseholdPerson.free_text_restrictions),
             )
         )
@@ -172,6 +194,8 @@ def _to_person(row: HouseholdPerson) -> Person:
         age_band=row.age_band,
         diet=row.diet,
         allergens=frozenset(row.allergens),
+        avoided_ingredients=frozenset(row.avoided_ingredients),
+        avoided_ingredients_strict=row.avoided_ingredients_strict,
         infant_texture=row.infant_texture,
         free_text_restrictions=row.free_text_restrictions,
     )
