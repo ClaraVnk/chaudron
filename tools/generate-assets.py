@@ -132,14 +132,27 @@ async def render_all() -> list[Path]:
                 )
             )
 
+        # Opaque, for the same reason `apple-touch-icon` below is — and this is
+        # where that reasoning was missing.
+        #
+        # These two are the manifest's `purpose: "any"` icons, so they are what
+        # iOS uses for a home-screen shortcut to a page inside `scope`, in
+        # preference to the touch icon. Transparent, they were composited onto
+        # black; the mark is dark charcoal, so it vanished, and iOS drew its own
+        # letter fallback instead. The bug reads as "the favicon does not work"
+        # and is really "the icon is there and invisible".
+        #
+        # `page_html` paints the background, so the PNG carries it rather than
+        # relying on whatever composites it.
         for size in (192, 512):
             written.append(
                 await shoot(
                     browser,
-                    page_html(full, size, size),
+                    page_html(full, size, size, background="#F7F3EC"),
                     size,
                     size,
                     ASSETS / f"icon-{size}.png",
+                    transparent=False,
                 )
             )
 
