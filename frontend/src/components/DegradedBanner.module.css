@@ -69,3 +69,39 @@
   opacity: 0.9;
   max-width: 68ch;
 }
+
+/*
+ * The folded head of the "no provider" notice.
+ *
+ * `list-style: none` plus the WebKit pseudo-element: Safari draws its own
+ * disclosure triangle from `::-webkit-details-marker`, which ignores
+ * `list-style` and lands to the left of the warning sign.
+ */
+.summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+  min-height: var(--tap-target);
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summaryText {
+  flex: 1 1 auto;
+}
+
+/* The affordance. Without it a folded banner looks like a statement rather than
+   something openable, and the explanation nobody can find is the explanation
+   that was not written. */
+.summaryHint {
+  flex: 0 0 auto;
+  font-weight: 500;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -236,3 +236,42 @@
   border-radius: 4px;
   overflow-wrap: anywhere;
 }
+
+/*
+ * Attribution. Quiet by construction: this is the least important text on any
+ * screen, and it appears on all of them.
+ *
+ * `padding-bottom` clears the fixed tab bar so the last line is not sitting
+ * under it, and the rule above separates it from content without drawing a
+ * heavy line across a phone screen.
+ */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) calc(var(--nav-bar-height) + var(--space-4));
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.footer a:hover,
+.footer a:focus-visible {
+  color: var(--accent-text);
+}
+
+/* Once the tab bar becomes a side rail there is nothing at the bottom edge to
+   clear, and the extra padding would just be a gap. */
+@media (min-width: 48em) {
+  .footer {
+    padding-bottom: var(--space-4);
+  }
+}

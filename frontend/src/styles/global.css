@@ -80,8 +80,18 @@
   --shadow-md: 0 4px 14px -2px rgb(120 60 20 / 12%);
   --shadow-lg: 0 12px 32px -8px rgb(120 60 20 / 18%);
 
-  --bg: #f7f6f3;
-  --bg-subtle: #efede8;
+  /* The page is warmer and a shade deeper than it was, and the surfaces stay
+     white. That gap is what makes a card look like it is *resting on* something
+     rather than dissolving into it.
+
+     Measured rather than felt: `#f7f6f3` against `#ffffff` is about 3% of
+     luminance. No shadow survives that — a 12% shadow on a 3% step is invisible,
+     which is exactly what the first attempt at "more depth" discovered. Widening
+     the step to ~7% and tinting it toward the ember does the work the shadows
+     could not, and costs nothing in contrast: text is measured against the
+     surface, which has not moved. */
+  --bg: #f3f0ea;
+  --bg-subtle: #e9e4da;
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --border: #e2e0da;

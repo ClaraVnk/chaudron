@@ -154,6 +154,33 @@ function Shell({ tab, onTabChange }: ShellProps) {
         {tab === 'household' ? <HouseholdScreen state={members} /> : null}
       </main>
 
+      {/*
+        Attribution, and it sits above the tab bar rather than below it because
+        the bar is fixed to the bottom edge: a footer after it would be
+        unreachable on a phone.
+
+        `rel="noopener noreferrer"` on both — `noopener` because a page opened
+        from here must not get a handle on this one, and `noreferrer` because
+        the referrer would otherwise carry the path of whatever screen the
+        household was on when they clicked.
+      */}
+      <footer className={styles.footer}>
+        <span>
+          Réalisé par{' '}
+          <a href="https://cyberloutre.fr" target="_blank" rel="noopener noreferrer">
+            Loutre
+          </a>{' '}
+          <span aria-hidden="true">🦦</span>
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          propulsé par{' '}
+          <a href="https://stackops.ch" target="_blank" rel="noopener noreferrer">
+            StackOps
+          </a>
+        </span>
+      </footer>
+
       <nav className={styles.nav} aria-label="Navigation principale">
         {TABS.map((entry) => (
           <button

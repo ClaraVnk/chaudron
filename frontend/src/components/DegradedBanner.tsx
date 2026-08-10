@@ -59,13 +59,28 @@ export function DegradedBanner({ onConfigureProvider }: DegradedBannerProps) {
 
   if (!capabilities.configured) {
     return (
-      <div className={styles.banner} role="status">
-        <p className={styles.header}>
+      /*
+       * Folded, and the reason is measured rather than aesthetic: expanded, this
+       * banner took 40% of a phone screen before a single stock item appeared,
+       * on every load, for a state that is not an error — the inventory works
+       * perfectly without a provider.
+       *
+       * Nothing is removed. The two paragraphs still say what they said,
+       * including the sentence about consent belonging to the household rather
+       * than to the server administrator, which is the one thing here that is
+       * not obvious. They are one tap away instead of unavoidable, and `<details>`
+       * carries that for free: keyboard-operable, announced as a disclosure, and
+       * still findable by in-page search when collapsed.
+       */
+      <details className={styles.banner}>
+        <summary className={styles.summary}>
           <span className={styles.mark} aria-hidden="true">
             ⚠
           </span>
-          Aucun fournisseur d’IA configuré
-        </p>
+          <span className={styles.summaryText}>Aucun fournisseur d’IA configuré</span>
+          <span className={styles.summaryHint}>Pourquoi&nbsp;?</span>
+        </summary>
+
         <p>
           L’inventaire fonctionne normalement. Les suggestions de recettes et la lecture d’un ticket
           photographié resteront indisponibles tant que ce foyer n’aura pas enregistré de
@@ -88,7 +103,7 @@ export function DegradedBanner({ onConfigureProvider }: DegradedBannerProps) {
         ) : (
           <p>Ouvrez l’onglet « Recettes » pour l’enregistrer.</p>
         )}
-      </div>
+      </details>
     );
   }
 
