@@ -74,6 +74,27 @@
 .groupName {
   font-size: 1rem;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * A short ember rule before each location name.
+ *
+ * The palette is built on fire and the interface showed it in two places: a 3px
+ * border on cards that are about to expire, and one button. Everything else was
+ * grey on off-white, which is why an application called Chaudron read as a
+ * spreadsheet. This puts the accent on the one element that structures the
+ * screen — where you keep things — at a size that marks without shouting.
+ */
+.groupName::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 3px;
+  height: 1.05em;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), var(--ember));
 }
 
 .groupKind {
@@ -220,7 +241,14 @@
 }
 
 .itemActions button {
-  flex: 1;
+  /* `1 1 auto`, not `1`: equal shares forced "Retirer du stock" into a column
+     barely wider than "Ajuster", so the label broke across two lines in almost
+     every card and the row lost its baseline. Sizing from the content lets the
+     wide action keep its line, and `nowrap` makes the row wrap between buttons
+     — which reads as a layout — instead of inside a label, which reads as a
+     bug. */
+  flex: 1 1 auto;
+  white-space: nowrap;
   min-height: var(--tap-target);
   font-size: 0.85rem;
 }
@@ -239,6 +267,26 @@
 @container item (max-width: 16rem) {
   .itemActions button {
     flex: 1 1 100%;
+  }
+}
+
+/*
+ * Between 16rem and 26rem the three actions fit on one line only if they may
+ * give up some padding — which is the whole width of a card in the desktop
+ * grid, and the width the previous rule left looking broken: "Retirer du stock"
+ * kept its own line and every card in the row grew to match the tallest.
+ *
+ * Shrinking the padding rather than the type: the labels stay at 0.85rem and
+ * the tap target stays at 44px, so nothing here trades legibility or reach for
+ * tidiness.
+ */
+@container item (min-width: 16.01rem) and (max-width: 26rem) {
+  .itemActions {
+    gap: var(--space-1);
+  }
+
+  .itemActions button {
+    padding-inline: var(--space-1);
   }
 }
 

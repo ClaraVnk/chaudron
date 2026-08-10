@@ -68,11 +68,30 @@
   --font-body:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
 
-  --shadow-sm: 0 1px 2px rgb(34 36 42 / 8%);
-  --shadow-md: 0 4px 16px rgb(34 36 42 / 10%);
+  /* Warm shadows, and the tint is the point rather than a flourish.
+     `rgb(34 36 42)` is a cold grey; dropped onto a cream background it reads as
+     dirt on the surface instead of light behind the object. Tinting toward the
+     ember the whole palette is built on keeps a raised card looking lit rather
+     than smudged, at the same opacity.
 
-  --bg: #f7f6f3;
-  --bg-subtle: #efede8;
+     Three steps, not two: everything used to be flat or floating, with nothing
+     in between, so a card and a modal claimed the same distance from the page. */
+  --shadow-sm: 0 1px 2px rgb(120 60 20 / 8%);
+  --shadow-md: 0 4px 14px -2px rgb(120 60 20 / 12%);
+  --shadow-lg: 0 12px 32px -8px rgb(120 60 20 / 18%);
+
+  /* The page is warmer and a shade deeper than it was, and the surfaces stay
+     white. That gap is what makes a card look like it is *resting on* something
+     rather than dissolving into it.
+
+     Measured rather than felt: `#f7f6f3` against `#ffffff` is about 3% of
+     luminance. No shadow survives that — a 12% shadow on a 3% step is invisible,
+     which is exactly what the first attempt at "more depth" discovered. Widening
+     the step to ~7% and tinting it toward the ember does the work the shadows
+     could not, and costs nothing in contrast: text is measured against the
+     surface, which has not moved. */
+  --bg: #f3f0ea;
+  --bg-subtle: #e9e4da;
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --border: #e2e0da;
@@ -128,8 +147,11 @@
 
     --focus-ring: #93c5fd;
 
+    /* Pure black in the dark theme: there is no warm surface left to tint
+       against, and a coloured shadow on a dark ground reads as a halo. */
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-md: 0 4px 16px rgb(0 0 0 / 45%);
+    --shadow-md: 0 4px 14px -2px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 12px 32px -8px rgb(0 0 0 / 55%);
   }
 }
 
@@ -284,6 +306,73 @@ img {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Motion
+   ---------------------------------------------------------------------------
+   This application had none at all — no transition, no keyframe — which is why
+   it reads as a spreadsheet with rounded corners. Motion here is not decoration:
+   each of the three below answers a question the interface was leaving to the
+   user.
+
+   Everything is neutralised by the `prefers-reduced-motion` block that follows.
+   That block uses `*` with `!important`, so anything added here inherits the
+   opt-out for free — which is what makes adding motion at all defensible.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Fast enough not to be waited on, slow enough to be seen. Anything under
+     ~120ms reads as a jump rather than a movement. */
+  --duration-fast: 140ms;
+  --duration-base: 240ms;
+
+  /* Decelerating: things arrive and settle rather than stopping dead. */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* "This is working right now." The ring grows out of the element and fades,
+   which reads as something emitting rather than something blinking — a blink
+   says *alert*, and none of the places this is used are alarming.
+
+   Ember-coloured on purpose: it is the one warm accent this palette already
+   owns, so a live state looks like the same product rather than a borrowed
+   widget. */
+@keyframes chaudron-ember-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(217 72 15 / 45%);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgb(217 72 15 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(217 72 15 / 0%);
+  }
+}
+
+/* "This just appeared." A row added to a list otherwise materialises with no
+   indication of which one is new — on the inventory screen, after a scan, that
+   is exactly the question the user is asking. */
+@keyframes chaudron-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* "Something is still coming." For skeletons and pending rows, where a static
+   grey block is indistinguishable from a broken one. */
+@keyframes chaudron-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
