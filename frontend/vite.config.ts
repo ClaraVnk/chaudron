@@ -42,6 +42,27 @@ const DEFAULT_SITE_URL = 'https://chaudron.example';
  */
 const ALLOW_DEFAULT_SITE_URL = 'VITE_ALLOW_DEFAULT_SITE_URL';
 
+/**
+ * Build a bundle that names no site, leaving `__SITE_URL__` in place for the
+ * deployment to substitute.
+ *
+ * This is what lets the published container image carry the interface. The site
+ * URL is the *only* thing that made a build instance-specific once the API
+ * address started defaulting to the page's own origin (`src/api/config.ts`), and
+ * it appears in exactly three text files: `index.html`, `robots.txt` and
+ * `sitemap.xml`. Deferring it turns one image into an artefact every operator
+ * can deploy, signed once and pinned by digest, instead of a tarball each of
+ * them has to build and nobody can verify.
+ *
+ * It is a *third* mode, not a relaxation of the guard below. A build that simply
+ * forgot `VITE_SITE_URL` still fails, because the failure it prevents is real:
+ * shipping somebody else's domain in `canonical`. Deferring is a statement that
+ * the substitution happens later, and the deployment is expected to fail just as
+ * loudly if the placeholder survives to the served file — see the Ansible role's
+ * `Assert no __SITE_URL__ placeholder survived`.
+ */
+const DEFER_SITE_URL = 'VITE_DEFER_SITE_URL';
+
 const LANDING_PATHS = new Set(['/index.html', 'index.html']);
 
 /** Paths the crawlers are asked to leave alone, in `robots.txt` order. */
@@ -108,10 +129,27 @@ function htmlProxyIdsAreAbsolutePaths(): Plugin {
   };
 }
 
-function resolveSiteUrl(env: Record<string, string>): { url: string; explicit: boolean } {
+function isTrue(value: string | undefined): boolean {
+  return value === 'true' || value === '1';
+}
+
+function resolveSiteUrl(env: Record<string, string>): {
+  url: string;
+  explicit: boolean;
+  deferred: boolean;
+} {
   const raw = env['VITE_SITE_URL']?.trim();
-  if (!raw) return { url: DEFAULT_SITE_URL, explicit: false };
-  return { url: raw.replace(/\/+$/, ''), explicit: true };
+  if (raw) return { url: raw.replace(/\/+$/, ''), explicit: true, deferred: false };
+
+  // Resolving the placeholder *to itself* is what defers it: every emitter below
+  // — the landing page, robots.txt, sitemap.xml — goes on substituting `siteUrl`
+  // exactly as before, and what lands in `dist/` is the marker the deployment
+  // looks for. No emitter needs to know about this mode.
+  if (isTrue(env[DEFER_SITE_URL])) {
+    return { url: SITE_URL_PLACEHOLDER, explicit: false, deferred: true };
+  }
+
+  return { url: DEFAULT_SITE_URL, explicit: false, deferred: false };
 }
 
 /**
@@ -172,6 +210,16 @@ function seoAssets(): Plugin {
       const env = config.env as Record<string, string>;
       const resolved = resolveSiteUrl(env);
       siteUrl = resolved.url;
+
+      if (resolved.deferred) {
+        config.logger.info(
+          `[chaudron:seo-assets] ${DEFER_SITE_URL} is set: index.html, robots.txt and ` +
+            `sitemap.xml keep the literal ${SITE_URL_PLACEHOLDER}. The deployment must ` +
+            `substitute it — serving this output unsubstituted publishes a canonical URL ` +
+            `that is not a URL.`,
+        );
+        return;
+      }
 
       if (resolved.explicit || config.command !== 'build') return;
 
@@ -421,5 +469,40 @@ export default defineConfig({
         app: 'app/index.html',
       },
     },
+  },
+
+  /**
+   * Dev-only, and it exists so the development loop needs no configuration at
+   * all.
+   *
+   * `src/api/config.ts` defaults the API address to the origin the page was
+   * served from. In production that is exactly right — one proxy serves the
+   * interface and the API on one origin, which is what the `__Host-` session
+   * cookie requires. Under `vite dev` it would be wrong: the page comes from
+   * :5173 and the API listens on :8000, so the default would point the client
+   * at a dev server that has no `/v1`.
+   *
+   * Proxying those paths makes the two agree, which means `npm run dev` works
+   * against a local backend with no `.env.local` and no build-time variable —
+   * and, more importantly, exercises the *same* same-origin arrangement the
+   * deployment uses, rather than a cross-origin one that hides cookie problems
+   * until production.
+   *
+   * `server.proxy` applies to `vite dev` only; it is absent from `vite build`
+   * output and cannot affect a deployed bundle.
+   *
+   * The target is a literal rather than an environment variable on purpose:
+   * reading one here would mean `process`, which means `@types/node`, which is a
+   * dependency added to this project for a single string in a dev-only branch.
+   * `8000` is `CHAUDRON_PORT`'s own default; edit this line if your backend
+   * listens elsewhere.
+   */
+  server: {
+    proxy: Object.fromEntries(
+      ['/v1', '/healthz', '/readyz', '/caldav', '/csp-report'].map((path) => [
+        path,
+        { target: 'http://127.0.0.1:8000', changeOrigin: false },
+      ]),
+    ),
   },
 });

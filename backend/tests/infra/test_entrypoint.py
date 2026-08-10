@@ -63,7 +63,11 @@ def test_the_entrypoint_is_executable_and_shipped() -> None:
     assert _ENTRYPOINT.stat().st_mode & stat.S_IXUSR
 
     containerfile = (_ENTRYPOINT.parents[1] / "Containerfile").read_text(encoding="utf-8")
-    assert "COPY --chown=root:root scripts/entrypoint.sh /app/scripts/" in containerfile
+    # `backend/scripts/…` rather than `scripts/…`: the build context moved from
+    # `backend/` to the repository root when the image started building the
+    # interface as well, so every COPY source gained the prefix. This assertion
+    # is deliberately literal — it caught that change, which is what it is for.
+    assert "COPY --chown=root:root backend/scripts/entrypoint.sh /app/scripts/" in containerfile
     assert 'CMD ["/app/scripts/entrypoint.sh"]' in containerfile
 
 

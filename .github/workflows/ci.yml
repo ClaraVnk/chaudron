@@ -175,13 +175,14 @@ jobs:
 
       - name: Build image
         run: |
+          # Root context, not `backend/` — the image builds the interface too.
           podman build \
             --format docker \
             --file backend/Containerfile \
             --tag "localhost/chaudron-api:${GITHUB_SHA::12}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            backend
+            .
 
       - name: Inspect image
         run: podman image inspect "localhost/chaudron-api:${GITHUB_SHA::12}" --format '{{ .Id }} {{ .Config.User }}'

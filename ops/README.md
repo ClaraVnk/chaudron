@@ -1647,19 +1647,40 @@ CHAUDRON_API_UPSTREAM=chaudron:8000
 ```
 
 ```sh
-# 2. Build and publish the PWA. VITE_API_BASE_URL is the SAME origin as the
-#    site: the proxy serves both, which is what keeps CORS out of the picture
-#    entirely (CHAUDRON_CORS_ORIGINS stays empty).
-VITE_API_BASE_URL=https://chaudron.example.tld \
-VITE_SITE_URL=https://chaudron.example.tld \
-  npm --prefix frontend ci && npm --prefix frontend run build
-rsync -a --delete frontend/dist/ ~chaudron/chaudron/www/
+# 2. Publish the PWA. It is inside the image you already pull, at /app/frontend,
+#    so there is nothing to build here.
+podman run --rm --network=none --cap-drop=all \
+  -v ~chaudron/chaudron/www:/out:Z \
+  ghcr.io/claravnk/chaudron:<tag> \
+  /bin/sh -c 'cp -a /app/frontend/. /out/'
+
+# 3. Fill in the site URL. The image cannot know it, so the build leaves the
+#    literal __SITE_URL__ in the three files that carry it.
+sed -i 's|__SITE_URL__|https://chaudron.example.tld|g' \
+  ~chaudron/chaudron/www/index.html \
+  ~chaudron/chaudron/www/robots.txt \
+  ~chaudron/chaudron/www/sitemap.xml
+
+# 4. Refuse to serve a surviving placeholder. grep exits 1 on no match, which is
+#    the outcome you want here.
+! grep -rl __SITE_URL__ ~chaudron/chaudron/www
 ```
 
-**Both `VITE_*` values are baked into the bundle at build time.** Vite substitutes
-them textually; nothing reads them at runtime, and there is no environment
-variable on the server that can change them afterwards. Two consequences worth
-stating once:
+**The interface ships in the image, and that is what keeps it in step with the
+API.** It used to be a bundle built off-host and copied over, which meant two
+artefacts with two versions and nothing tying them together — an interface could
+lag its API by several releases and the only symptom was a feature that did not
+appear. One tag now moves both.
+
+`VITE_API_BASE_URL` is **not** set at build time any more: the client derives the
+API address from the origin the page was served from, which is the arrangement
+the `__Host-` session cookie already requires. Set it only for the one layout the
+default cannot express — `api.example.org` beside `app.example.org` — and be
+aware that doing so bakes a hostname into the bundle and makes it specific to
+that instance again.
+
+**Changing the domain** means re-running steps 2 to 4, not rebuilding anything:
+the substitution is a deploy-time step now.
 
 - **Changing the domain means rebuilding and re-publishing the PWA.** Restarting
   the proxy, or editing `caddy.env`, will not do it — the old origin stays
