@@ -485,6 +485,7 @@ export function InventoryScreen({
                   <InventoryItemRow
                     key={item.id}
                     item={item}
+                    locations={locations}
                     onRemove={removeItem}
                     onAdjusted={adjustedItem}
                     onFrozen={frozenItem}

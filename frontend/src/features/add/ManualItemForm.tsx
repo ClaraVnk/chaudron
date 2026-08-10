@@ -9,6 +9,7 @@ import type {
   StorageLocation,
 } from '../../api/types';
 import { Button, Callout, Field } from '../../components/ui';
+import { ExpiryDateInput } from '../../components/ExpiryDateInput';
 import { controlClass } from '../../components/controlClass';
 import { hasValidGtinChecksum, isPlausibleGtin, normaliseGtin } from '../../lib/gtin';
 import { readLastLocationId, writeLastLocationId } from '../../lib/preferences';
@@ -289,15 +290,11 @@ export function ManualItemForm({ draft, locations, onSaved, onCancel }: Props) {
 
         <Field label="Date de péremption" hint="Facultatif.">
           {({ id, describedBy }) => (
-            <input
+            <ExpiryDateInput
               id={id}
-              aria-describedby={describedBy}
-              className={controlClass()}
-              type="date"
+              describedBy={describedBy}
               value={expiresOn}
-              onChange={(event) => {
-                setExpiresOn(event.target.value);
-              }}
+              onChange={setExpiresOn}
             />
           )}
         </Field>

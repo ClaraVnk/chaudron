@@ -1,0 +1,55 @@
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * The picker is a label pointing at a real `<input type="date">`, not a button
+ * that opens one by script: `showPicker()` is refused outside a user gesture on
+ * some browsers and absent on others, and a control that silently does nothing
+ * is worse than one that looks plain.
+ *
+ * Sized as a full tap target — it is the slow path, not a decoration, and a
+ * 24px calendar icon is exactly the control somebody with unsteady hands
+ * cannot hit.
+ */
+.pickerLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap-target);
+  min-height: var(--tap-target);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.pickerLabel:hover {
+  border-color: var(--accent);
+}
+
+/*
+ * Present and focusable, but not laid out: the label above is what is clicked,
+ * and `display: none` would take the native picker with it. Kept at the same
+ * grid cell so the browser anchors its calendar next to the icon rather than in
+ * a corner.
+ */
+.picker {
+  grid-column: 2;
+  grid-row: 1;
+  width: var(--tap-target);
+  height: var(--tap-target);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
