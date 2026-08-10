@@ -209,6 +209,14 @@
   font-size: 0.875rem;
   font-weight: 500;
   white-space: nowrap;
+  /* Filter chips are the most-pressed control on the inventory screen and they
+     snapped between states, which makes a deliberate choice look like a glitch.
+     The border and background are what actually change; naming them rather than
+     `all` keeps the layout properties out of the animation. */
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .chipActive {

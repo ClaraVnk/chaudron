@@ -98,6 +98,26 @@
   pointer-events: none;
 }
 
+/*
+ * The "I am looking" ring.
+ *
+ * A viewfinder that never moves gives no way to tell a camera that is decoding
+ * from one that has frozen — which matters more here than in most scanners,
+ * because the stream is now kept alive between scans and a paused view looks
+ * exactly like an active one.
+ *
+ * It is a pseudo-element rather than an animation on `.reticle` itself: that
+ * element's `box-shadow` is already carrying the 100vmax darkened surround, and
+ * animating the same property would fight it.
+ */
+.reticle::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  animation: chaudron-ember-pulse 2.4s var(--ease-out) infinite;
+}
+
 .viewportPlaceholder {
   position: absolute;
   inset: 0;
