@@ -1,7 +1,12 @@
 import { useId, useState } from 'react';
 import { describeError } from '../../api/client';
 import { updateInventoryItem } from '../../api/endpoints';
-import type { InventoryItem, InventoryItemPatch, StorageLocation, UpdatedInventoryItem } from '../../api/types';
+import type {
+  InventoryItem,
+  InventoryItemPatch,
+  StorageLocation,
+  UpdatedInventoryItem,
+} from '../../api/types';
 import { Button } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
 import { formatAmount } from '../../lib/expiry';

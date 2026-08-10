@@ -58,7 +58,9 @@ export function ExpiryDateInput({ value, onChange, id, describedBy }: Props) {
     <div className={styles.row}>
       <input
         id={inputId}
-        aria-describedby={[describedBy, unreadable ? errorId : null].filter(Boolean).join(' ') || undefined}
+        aria-describedby={
+          [describedBy, unreadable ? errorId : null].filter(Boolean).join(' ') || undefined
+        }
         aria-invalid={unreadable || undefined}
         className={controlClass()}
         type="text"
