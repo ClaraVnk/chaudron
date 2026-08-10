@@ -12,7 +12,11 @@ the model at all. It reads ``allergens_risk`` -- the generated column that
 carries **all fourteen** allergens when nobody has documented the product -- and
 never ``allergens_contains``. An undocumented product is therefore withheld from
 anybody with a declared allergy by the shape of the data, not by this function
-having remembered that ``unknown`` exists.
+having remembered that ``unknown`` exists. ``avoided_ingredients_risk`` is the
+same column over a different vocabulary, read the same way and for the same
+reason; what differs between them is the strength of the evidence behind
+``declared``, which is a matter for the wording on screen and never for this
+function.
 
 *The resolver.* :func:`resolve` re-attaches an ingredient label the model wrote
 to something the household actually owns. It is deliberately **stricter** than a
@@ -24,10 +28,10 @@ anything that does not resolve is refused rather than guessed at.
 
 *The staples.* A recipe needs salt and oil, and no household stocks them as
 catalogue rows. :data:`PANTRY_STAPLES` is a short, closed, hand-reviewed list,
-each entry declaring the allergens it may carry and the infant rules it trips.
-It is the only way an ingredient may resolve to something outside the inventory,
-and adding an entry means declaring those two things -- there is no permissive
-default.
+each entry declaring the allergens it may carry, the ingredients it counts as
+and the infant rules it trips. It is the only way an ingredient may resolve to
+something outside the inventory, and adding an entry means declaring those three
+things -- there is no permissive default.
 
 What is deliberately **not** here: any notion of "probably fine". Every function
 below answers "withhold" or "resolve" and nothing in between, because the
@@ -49,6 +53,7 @@ from chaudron.domain.models import (
     AgeBand,
     Allergen,
     AllergenDataState,
+    AvoidedIngredient,
     Diet,
     InfantRiskKind,
     InfantTexture,
@@ -57,6 +62,7 @@ from chaudron.domain.models import (
 
 __all__ = [
     "ALLERGEN_LABELS",
+    "AVOIDED_INGREDIENT_LABELS",
     "DIET_EXCLUDED_MARKERS",
     "INFANT_BANDS",
     "MAX_FREE_TEXT_PREFERENCES",
@@ -145,6 +151,46 @@ ALLERGEN_LABELS: Final[Mapping[Allergen, str]] = {
     Allergen.SULPHITES: "sulfites",
     Allergen.LUPIN: "lupin",
     Allergen.MOLLUSCS: "mollusques",
+}
+
+#: The avoidable ingredients, in French, as a household would name them.
+#:
+#: Separate from :data:`ALLERGEN_LABELS` and never merged into it: the two lists
+#: are displayed next to each other and the interface has to be able to say
+#: which of them is a regulated declaration and which is a best-effort match on a
+#: wiki's ingredient parsing. One combined mapping would make that sentence
+#: impossible to write correctly.
+AVOIDED_INGREDIENT_LABELS: Final[Mapping[AvoidedIngredient, str]] = {
+    AvoidedIngredient.KIWI: "kiwi",
+    AvoidedIngredient.STRAWBERRY: "fraise",
+    AvoidedIngredient.BANANA: "banane",
+    AvoidedIngredient.PEACH: "pêche",
+    AvoidedIngredient.APRICOT: "abricot",
+    AvoidedIngredient.PINEAPPLE: "ananas",
+    AvoidedIngredient.MELON: "melon",
+    AvoidedIngredient.AVOCADO: "avocat",
+    AvoidedIngredient.COCONUT: "noix de coco",
+    AvoidedIngredient.CITRUS: "agrumes",
+    AvoidedIngredient.GRAPE: "raisin",
+    AvoidedIngredient.TOMATO: "tomate",
+    AvoidedIngredient.ONION: "oignon",
+    AvoidedIngredient.GARLIC: "ail",
+    AvoidedIngredient.MUSHROOM: "champignon",
+    AvoidedIngredient.BELL_PEPPER: "poivron",
+    AvoidedIngredient.AUBERGINE: "aubergine",
+    AvoidedIngredient.COURGETTE: "courgette",
+    AvoidedIngredient.OLIVE: "olive",
+    AvoidedIngredient.CUCUMBER: "concombre",
+    AvoidedIngredient.CABBAGE: "chou",
+    AvoidedIngredient.SPINACH: "épinard",
+    AvoidedIngredient.CORIANDER: "coriandre",
+    AvoidedIngredient.MINT: "menthe",
+    AvoidedIngredient.CINNAMON: "cannelle",
+    AvoidedIngredient.GINGER: "gingembre",
+    AvoidedIngredient.CHILLI: "piment",
+    AvoidedIngredient.HONEY: "miel",
+    AvoidedIngredient.PORK: "porc",
+    AvoidedIngredient.ALCOHOL: "alcool",
 }
 
 #: The bands that make somebody a young child for the purposes of the reference
@@ -239,8 +285,29 @@ class Person:
     age_band: AgeBand
     diet: Diet
     allergens: frozenset[Allergen]
+    #: Deliberately its own field beside ``allergens`` rather than folded in.
+    #: Both are applied by the same screen; only one of them rests on a
+    #: declaration a manufacturer was obliged to make.
+    avoided_ingredients: frozenset[AvoidedIngredient]
+    #: Whether an unreadable ingredient list counts as "might contain it".
+    #:
+    #: Measured before this existed: on 1 263 864 French products, only 13.2%
+    #: carry an ingredient list this parser can read. 72% of packaged products
+    #: have no list at all. Treating unknown as unsafe — the doctrine the
+    #: regulated allergens rightly use — therefore withholds **86.8%** of the
+    #: catalogue, which is not a filter but a switch that turns the inventory
+    #: off.
+    #:
+    #: So the household decides, per person, and the screen says which they
+    #: chose. `True` is the allergen doctrine and is right for a diagnosis;
+    #: `False` withholds only what is positively named and reports the rest as
+    #: undocumented, which is right for a dislike. Neither is a default that can
+    #: be inferred, because the difference is medical.
     infant_texture: InfantTexture | None
     free_text_restrictions: str | None
+    #: `False` is the database default and the ordinary case: somebody who
+    #: ticked an ingredient without being asked to choose a reading.
+    avoided_ingredients_strict: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +322,17 @@ class HouseholdConstraints:
 
     members: tuple[Person, ...]
     excluded_allergens: frozenset[Allergen]
+    #: The union of the table's avoided ingredients. Second class of contract
+    #: 4bis like the allergens -- a filter, applied before the model is asked
+    #: anything -- but on evidence that is weaker by a wide margin, which is why
+    #: it is carried under its own name all the way to the screen.
+    avoided_ingredients: frozenset[AvoidedIngredient]
+    #: True when **anybody at the table** asked for the strict reading. The
+    #: union takes the stricter of the two on purpose: a table seating one
+    #: person with a diagnosis and one with a dislike must be catered for the
+    #: diagnosis, and the cost of the other reading is a meal nobody wanted
+    #: rather than a meal somebody cannot have.
+    avoided_ingredients_strict: bool
     diet: Diet
     infant_texture: InfantTexture | None
     age_bands: frozenset[AgeBand]
@@ -283,8 +361,14 @@ def union_of(people: Iterable[Person]) -> HouseholdConstraints:
     textures = [person.infant_texture for person in members if person.infant_texture is not None]
     texture = min(textures, key=lambda value: _TEXTURE_RANK[value], default=None)
     allergens: set[Allergen] = set()
+    avoided: set[AvoidedIngredient] = set()
+    strict = False
     for person in members:
         allergens |= person.allergens
+        avoided |= person.avoided_ingredients
+        # `any`, not `all`: a table seating a diagnosis and a dislike is
+        # catered for the diagnosis.
+        strict = strict or person.avoided_ingredients_strict
     preferences = tuple(
         text
         for text in ((person.free_text_restrictions or "").strip() for person in members)
@@ -293,6 +377,8 @@ def union_of(people: Iterable[Person]) -> HouseholdConstraints:
     return HouseholdConstraints(
         members=members,
         excluded_allergens=frozenset(allergens),
+        avoided_ingredients=frozenset(avoided),
+        avoided_ingredients_strict=strict,
         diet=diet,
         infant_texture=texture,
         age_bands=frozenset(person.age_band for person in members),
@@ -427,6 +513,15 @@ class ProductFacts:
     name: str
     allergen_state: AllergenDataState
     allergens_risk: frozenset[Allergen]
+    #: The other generated column, and it has no default for the same reason:
+    #: an empty set reads as "names none of them", which is precisely what a
+    #: product with an unreadable ingredient list must never be taken to say.
+    avoided_ingredients_risk: frozenset[AvoidedIngredient]
+    #: What the ingredient list *names*, as opposed to what it fails to rule
+    #: out. Empty for a product nobody documented — which is why it can only be
+    #: read together with a household that accepted that reading. See
+    #: `HouseholdConstraints.avoided_ingredients_strict`.
+    avoided_ingredients_named: frozenset[AvoidedIngredient]
     pnns_markers: frozenset[PnnsMarker]
     category_tags: tuple[str, ...]
 
@@ -469,6 +564,7 @@ class WithholdReason(enum.StrEnum):
     ALLERGEN = "allergen"
     DIET = "diet"
     INFANT_RULE = "infant_rule"
+    AVOIDED_INGREDIENT = "avoided_ingredient"
 
 
 def withhold_reason(
@@ -491,6 +587,28 @@ def withhold_reason(
         return WithholdReason.DIET
     if any(_rule_matches(rule, facts) for rule in rules):
         return WithholdReason.INFANT_RULE
+    # Last, because it is the only one of the four whose failure costs a meal
+    # somebody did not want rather than a meal somebody cannot have.
+    #
+    # WHICH SET IS READ IS THE HOUSEHOLD'S DECISION, and it is the only place in
+    # this function where that is true. `avoided_ingredients_risk` carries the
+    # allergen doctrine — an unreadable ingredient list counts as "might contain
+    # it" — and measured against the French catalogue that withholds 86.8% of
+    # products, because 72% of packaged ones carry no ingredient list at all.
+    # Correct for a diagnosis; useless for a dislike, and indistinguishable from
+    # a broken inventory.
+    #
+    # So a table where nobody asked for the strict reading is filtered on what
+    # the catalogue positively *names*, and everything it could not read is
+    # reported as undocumented rather than removed. See
+    # `HouseholdConstraints.avoided_ingredients_strict`.
+    avoided = (
+        facts.avoided_ingredients_risk
+        if constraints.avoided_ingredients_strict
+        else facts.avoided_ingredients_named
+    )
+    if constraints.avoided_ingredients & avoided:
+        return WithholdReason.AVOIDED_INGREDIENT
     return None
 
 
@@ -525,16 +643,28 @@ class PantryStaple:
     label: str
     tokens: frozenset[str]
     allergens: frozenset[Allergen]
+    avoided_ingredients: frozenset[AvoidedIngredient]
     infant_rule_codes: frozenset[str]
 
 
-def _staple(label: str, *, infant_rules: frozenset[str] = frozenset()) -> PantryStaple:
+def _staple(
+    label: str,
+    *,
+    infant_rules: frozenset[str] = frozenset(),
+    avoided: frozenset[AvoidedIngredient] = frozenset(),
+) -> PantryStaple:
     return PantryStaple(
         label=label,
         tokens=content_tokens(label),
         # None of the six carries one of the fourteen. Stated per entry rather
         # than assumed for the list, so a seventh entry has to say so.
         allergens=frozenset(),
+        # Declared per entry too, and the reason it cannot be inferred is
+        # `en:olive-oil`: Open Food Facts does not make it a child of `en:olive`,
+        # so no amount of walking the ingredient taxonomy reaches it. A household
+        # avoiding olives would have been offered olive oil by the one list that
+        # bypasses the catalogue entirely.
+        avoided_ingredients=avoided,
         infant_rule_codes=infant_rules,
     )
 
@@ -553,7 +683,7 @@ PANTRY_STAPLES: Final[tuple[PantryStaple, ...]] = (
     _staple("gros sel", infant_rules=frozenset({"added_salt"})),
     _staple("poivre"),
     _staple("vinaigre"),
-    _staple("huile olive"),
+    _staple("huile olive", avoided=frozenset({AvoidedIngredient.OLIVE})),
     _staple("huile tournesol"),
 )
 
@@ -567,6 +697,7 @@ def staples_allowed_for(
         staple
         for staple in PANTRY_STAPLES
         if not (staple.allergens & constraints.excluded_allergens)
+        and not (staple.avoided_ingredients & constraints.avoided_ingredients)
         and not (staple.infant_rule_codes & blocked)
     )
 

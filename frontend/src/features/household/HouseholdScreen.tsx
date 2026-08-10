@@ -5,6 +5,7 @@ import type { MembersState } from '../../hooks/useMembers';
 import {
   AGE_BAND_LABELS,
   ALLERGEN_LABELS,
+  AVOIDED_INGREDIENT_LABELS,
   DIET_LABELS,
   TEXTURE_LABELS,
   isInfantBand,
@@ -60,6 +61,13 @@ function MemberCard({
         {member.allergens.length === 0
           ? 'aucun'
           : member.allergens.map((code) => ALLERGEN_LABELS[code]).join(', ')}
+      </p>
+
+      <p className={styles.cardLine}>
+        <span className={styles.cardLabel}>Aliments évités</span>
+        {member.avoided_ingredients.length === 0
+          ? 'aucun'
+          : member.avoided_ingredients.map((code) => AVOIDED_INGREDIENT_LABELS[code]).join(', ')}
       </p>
 
       {member.free_text_restrictions.trim() !== '' ? (

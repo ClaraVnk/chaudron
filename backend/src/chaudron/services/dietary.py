@@ -105,6 +105,7 @@ class DietaryService:
             # that fact greppable (``domain/models.py``).
             .options(
                 undefer(HouseholdPerson.allergens),
+                undefer(HouseholdPerson.avoided_ingredients),
                 undefer(HouseholdPerson.free_text_restrictions),
             )
             .order_by(HouseholdPerson.sort_order, HouseholdPerson.display_name)
@@ -204,6 +205,12 @@ class DietaryService:
                     # documented the product, so the natural exclusion withholds
                     # it (ADR-0009).
                     Product.allergens_risk.label("allergens_risk"),
+                    # The other generated column, read for the same reason: it
+                    # carries every avoidable ingredient when the list could not
+                    # be parsed, so the natural exclusion withholds the product.
+                    # `avoided_ingredients_named` must never appear here.
+                    Product.avoided_ingredients_risk.label("avoided_ingredients_risk"),
+                    Product.avoided_ingredients_named.label("avoided_ingredients_named"),
                     Product.pnns_markers.label("pnns_markers"),
                     Product.category_tag.label("category_tag"),
                     # The taxonomy list, extracted server-side rather than by
@@ -268,6 +275,8 @@ def _to_person(row: HouseholdPerson) -> Person:
         age_band=row.age_band,
         diet=row.diet,
         allergens=frozenset(row.allergens),
+        avoided_ingredients=frozenset(row.avoided_ingredients),
+        avoided_ingredients_strict=row.avoided_ingredients_strict,
         infant_texture=row.infant_texture,
         free_text_restrictions=row.free_text_restrictions,
     )
@@ -281,6 +290,8 @@ def _to_line(row: Any) -> StockLine:
             name=row.product_name,
             allergen_state=row.allergen_state,
             allergens_risk=frozenset(row.allergens_risk or ()),
+            avoided_ingredients_named=frozenset(row.avoided_ingredients_named or ()),
+            avoided_ingredients_risk=frozenset(row.avoided_ingredients_risk or ()),
             pnns_markers=frozenset(row.pnns_markers or ()),
             category_tags=_category_tags(row.category_tag, row.categories_tags),
         ),

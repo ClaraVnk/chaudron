@@ -331,6 +331,56 @@ export const ALLERGEN_CODES = [
 
 export type AllergenCode = (typeof ALLERGEN_CODES)[number];
 
+/**
+ * Foods a member keeps off their plate, outside the regulated fourteen.
+ *
+ * A closed vocabulary too, and for a reason worth keeping in mind here rather
+ * than only on the server: the catalogue column this filters on carries *every*
+ * entry of this list when a product's ingredient list could not be parsed, so a
+ * product nobody documented is withheld by default. That guarantee only holds
+ * while the list is closed — which is why free text next to it stays a
+ * preference and never becomes a filter.
+ *
+ * It is **not** a second allergen list. An allergen rests on a declaration the
+ * manufacturer was legally obliged to make; this rests on Open Food Facts having
+ * parsed a word. The two are separate fields on the wire so the interface can
+ * say which is which, and they must never be concatenated for display.
+ */
+export const AVOIDED_INGREDIENT_CODES = [
+  'kiwi',
+  'strawberry',
+  'banana',
+  'peach',
+  'apricot',
+  'pineapple',
+  'melon',
+  'avocado',
+  'coconut',
+  'citrus',
+  'grape',
+  'tomato',
+  'onion',
+  'garlic',
+  'mushroom',
+  'bell_pepper',
+  'aubergine',
+  'courgette',
+  'olive',
+  'cucumber',
+  'cabbage',
+  'spinach',
+  'coriander',
+  'mint',
+  'cinnamon',
+  'ginger',
+  'chilli',
+  'honey',
+  'pork',
+  'alcohol',
+] as const;
+
+export type AvoidedIngredientCode = (typeof AVOIDED_INGREDIENT_CODES)[number];
+
 export type Diet = 'omnivore' | 'pescatarian' | 'vegetarian' | 'vegan';
 
 export type InfantTexture = 'smooth' | 'soft_pieces' | 'pieces';
@@ -345,6 +395,9 @@ export interface HouseholdMember {
   age_band: AgeBand;
   diet: Diet;
   allergens: AllergenCode[];
+  /** Best-effort exclusions. A filter, but never a guarantee — see the constant above. */
+  avoided_ingredients: AvoidedIngredientCode[];
+  avoided_ingredients_strict: boolean;
   free_text_restrictions: string;
   /** Non-null if and only if `age_band` is an infant band — the server 422s otherwise. */
   infant_texture: InfantTexture | null;
@@ -392,6 +445,7 @@ export interface ExpiryPressure {
 export interface AppliedConstraints {
   members: { id: string; display_name: string }[];
   excluded_allergens: AllergenCode[];
+  avoided_ingredients: AvoidedIngredientCode[];
   diet: Diet | null;
   infant_texture: InfantTexture | null;
   age_bands: AgeBand[];
