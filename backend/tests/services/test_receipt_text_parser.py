@@ -159,6 +159,96 @@ def test_a_caption_followed_by_a_purchase_line_yields_no_total() -> None:
     assert parsed.total is None
 
 
+# --------------------------------------------------------------------------- #
+# The drive recap's block layout
+# --------------------------------------------------------------------------- #
+
+#: Two articles as a recap prints them, with the section header above them.
+#: Transcribed from the operator's own recap (2026-08-17) -- the layout that
+#: imported fifty articles all named "Quantité".
+_RECAP_BLOCKS = (
+    "Crémerie, fromages (4)\n"
+    "Beurre - Bio - Baratte 40/45 - Plaquette 500g\n"
+    "Quantité : 1 5,99 €Prix unitaire : 5,99 €\n"
+    "11,98 €/kg\n"
+    "Yaourt nature - Bio - Pot 4x125g\n"
+    "Quantité : 2 4,40 €Prix unitaire : 2,20 €\n"
+    "2,45 €/kg\n"
+)
+
+
+def test_a_recap_article_is_named_by_the_line_above_its_quantity() -> None:
+    """The middle line is the only one that looks like a purchase, and it is not
+    the article. Reading line by line named every article "Quantité"."""
+    parsed, _ = parse_receipt_text(_RECAP_BLOCKS, max_lines=200)
+    assert [line.label for line in parsed.lines] == [
+        "Beurre - Bio - Baratte 40/45 - Plaquette 500g",
+        "Yaourt nature - Bio - Pot 4x125g",
+    ]
+    assert parsed.lines[1].quantity == Decimal(2)
+    assert parsed.lines[1].unit == "piece"
+    assert parsed.lines[1].unit_price == Decimal("2.20")
+    assert parsed.lines[1].total_price == Decimal("4.40")
+
+
+def test_a_section_header_is_never_read_as_an_article() -> None:
+    """ "Crémerie, fromages (4)" is followed by a designation, never by a
+    quantity, so the "line above a quantity" rule excludes it for free."""
+    parsed, _ = parse_receipt_text(_RECAP_BLOCKS, max_lines=200)
+    assert all("fromages" not in line.label for line in parsed.lines)
+
+
+def test_a_promotion_pushes_the_prices_down_and_they_are_still_found() -> None:
+    """Four of fifty articles carry one. It inserts its own amount and a
+    validity date between the count and the prices."""
+    parsed, _ = parse_receipt_text(
+        "Crème dessert - Pot 150g\n"
+        "Quantité : 1\n"
+        "0,68 € Offre à valoir sur votre prochaine commande\n"
+        "Date de validité jusqu'au 06/09\n"
+        "3,39 €Prix unitaire : 3,39 €\n"
+        "22,60 €/kg\n"
+        "Lait demi-écrémé - Brique 1L\n"
+        "Quantité : 1 1,15 €Prix unitaire : 1,15 €\n",
+        max_lines=200,
+    )
+    assert [(line.label, line.total_price) for line in parsed.lines] == [
+        ("Crème dessert - Pot 150g", Decimal("3.39")),
+        ("Lait demi-écrémé - Brique 1L", Decimal("1.15")),
+    ]
+
+
+def test_prices_further_than_the_window_are_refused_rather_than_guessed() -> None:
+    """An unbounded search would reach the *next* article's prices and record a
+    purchase at another one's price, with nothing on screen to say so."""
+    parsed, _ = parse_receipt_text(
+        "Crème dessert - Pot 150g\n"
+        "Quantité : 1\n"
+        "filler one\nfiller two\nfiller three\nfiller four\nfiller five\n"
+        "3,39 €Prix unitaire : 3,39 €\n"
+        "Lait demi-écrémé - Brique 1L\n"
+        "Quantité : 1 1,15 €Prix unitaire : 1,15 €\n",
+        max_lines=200,
+    )
+    assert [line.label for line in parsed.lines] == ["Lait demi-écrémé - Brique 1L"]
+
+
+def test_furniture_is_matched_on_whole_words_not_on_characters() -> None:
+    """``sac`` is in the list to drop the checkout bag. As a raw prefix it also
+    swallowed "Sachets fraîcheur…", a real article, which vanished from the
+    import with nothing to say a line had been refused."""
+    kept = _lines("SACHETS FRAICHEUR POUR FRUITS  2,97")
+    assert "SACHETS FRAICHEUR POUR FRUITS" in kept
+    assert _lines("SAC REUTILISABLE  0,50") == {}
+
+
+def test_a_till_receipt_still_reads_line_by_line() -> None:
+    """The block reader needs two quantity lines to engage; one is a
+    coincidence a till receipt could produce, two is a layout."""
+    parsed, _ = parse_receipt_text(RECAP, max_lines=200)
+    assert [line.label for line in parsed.lines][:2] == ["LT DEM 1/2 ECR 1L", "PDT NOUV 1KG"]
+
+
 def test_a_date_spelled_out_in_french_is_read() -> None:
     """A till roll prints 02/08/2026; a drive recap is a web page.
 

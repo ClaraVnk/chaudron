@@ -77,6 +77,55 @@ _TRAILING_TOTAL: Final = re.compile(
 _BARE_AMOUNT: Final = re.compile(rf"^\s*(?P<amount>{_AMOUNT})\s*(?:€|EUR)?\s*$", re.IGNORECASE)
 _CAPTION: Final = re.compile(rf"^(?!\s*{_AMOUNT}\s*$).*:\s*$")
 
+# --------------------------------------------------------------------------- #
+# The drive recap's own item shape
+# --------------------------------------------------------------------------- #
+# A till receipt puts one purchase on one line. A drive recap is a web page, and
+# its PDF extracts to a three-line block per article:
+#
+#     Beurre - Bio - Baratte 40/45 - Plaquette 500g   <- the designation
+#     Quantité : 1 5,99 €Prix unitaire : 5,99 €       <- count, line total, unit
+#     11,98 €/kg                                      <- the rate
+#
+# Read line by line, the middle line is the only one that looks like a purchase,
+# so the whole shop imported as fifty articles named "Quantité". Measured on the
+# operator's own recap, 2026-08-17, after the page ceiling was lifted and the
+# document finally reached the parser at all.
+#
+# The designation is defined as **the line immediately above a quantity line**.
+# That single rule also disposes of the section headers a recap prints
+# ("Fruits et légumes (8)"): a header is followed by a designation, never by a
+# quantity, so it is never mistaken for one. No separate pattern, nothing to
+# keep in step with the retailer's vocabulary.
+
+#: ``Quantité : 3`` -- the head of a block. The rest of the line is handed to
+#: ``_RECAP_PRICES`` because it is usually, but not always, on the same line.
+_RECAP_QUANTITY: Final = re.compile(
+    r"^\s*quantit[ée]\s*:\s*(?P<count>\d{1,3})\b(?P<rest>.*)$", re.I
+)
+
+#: ``5,99 €Prix unitaire : 5,99 €`` -- the line total then the unit price. The
+#: missing space before "Prix" is what the extraction produces; it is not a typo.
+_RECAP_PRICES: Final = re.compile(
+    rf"^\s*(?P<total>{_AMOUNT})\s*(?:€|EUR)?\s*prix\s+unitaire\s*:\s*(?P<unit>{_AMOUNT})\s*(?:€|EUR)?\s*$",
+    re.I,
+)
+
+#: How far past the quantity line the prices may sit. Four of the fifty articles
+#: measured carry a promotion, which inserts its own amount and a validity date
+#: between the count and the prices:
+#:
+#:     Quantité : 1
+#:     0,68 € Offre à valoir sur votre prochaine commande
+#:     Date de validité jusqu'au 06/09
+#:     3,39 €Prix unitaire : 3,39 €
+#:
+#: Three intervening lines is the widest case seen; four is one line of slack.
+#: A window rather than an unbounded search, because the next article's own
+#: prices are always further away than that -- an unbounded scan would attach
+#: them to the wrong purchase, which is the failure this module refuses to risk.
+_RECAP_PRICE_WINDOW: Final = 4
+
 #: A quantity with its unit. A bare number is never one: on a receipt the same
 #: digits are as likely to be a pack size, a till number or a queue position.
 _MEASURE: Final = r"(?P<qty>\d{1,5}(?:[.,]\d{1,3})?)\s*(?P<unit>kg|g|cl|ml|l)\b"
@@ -159,7 +208,7 @@ _NOT_A_TOTAL: Final = re.compile(r"\b(?:tva|sous[-\s]?total|articles?|points?|re
 
 #: Lines that are receipt furniture rather than purchases. Matched on the *start*
 #: of the line, folded and accent-free, so "T.V.A. 5,5%" and "tva 5,5 %" are one
-#: rule.
+#: rule -- and on whole words, see ``_is_furniture``.
 _NOT_A_PURCHASE: Final = tuple(
     sorted(
         {
@@ -383,6 +432,92 @@ def looks_like_receipt_text(text: str) -> bool:
     if len(stripped) < _MIN_USEFUL_CHARS:
         return False
     return any(char.isalpha() for char in stripped)
+
+
+def _is_furniture(folded: str) -> bool:
+    """Whether a folded line opens with one of the ``_NOT_A_PURCHASE`` words.
+
+    On a **word** boundary, not on raw characters. A bare ``startswith`` makes
+    every prefix in that list a wildcard over the words that begin with it, and
+    the shortest entry decides how much damage that does: ``sac`` -- there to
+    drop the checkout bag -- also swallowed "Sachets fraîcheur pour conserver
+    les fruits", a real article on the operator's recap of 2026-08-17. It
+    disappeared from the import with nothing on screen to say a line had been
+    refused, which is the one outcome contract 6ter treats as worse than a
+    missing field.
+
+    ``_fold`` has already collapsed punctuation to single spaces, so testing for
+    the word plus a space is exact: "sac reutilisable" is still furniture,
+    "sachets fraicheur" is a purchase again.
+    """
+    return any(folded == word or folded.startswith(word + " ") for word in _NOT_A_PURCHASE)
+
+
+def _read_recap_blocks(lines: list[str]) -> list[ReceiptLine]:
+    """The articles of a drive recap, read as blocks rather than as lines.
+
+    Returns an empty list when the document is not a recap, which is the signal
+    to fall back on the line-by-line reader. Two quantity blocks is the
+    threshold: one is a coincidence a till receipt could produce, two is a
+    layout.
+
+    Everything this reader takes is printed explicitly. The count comes from the
+    quantity line, the line total and the unit price from ``_RECAP_PRICES``, and
+    nothing is computed from anything else -- so a promotion this parser did not
+    understand cannot make a number up. The rate line ("11,98 €/kg") is
+    deliberately ignored: it prices a kilo, the count is a number of packs, and
+    combining them would put a weight in the cupboard that the recap never
+    claimed.
+    """
+    heads = [index for index, line in enumerate(lines) if _RECAP_QUANTITY.match(line)]
+    if len(heads) < 2:
+        return []
+
+    read: list[ReceiptLine] = []
+    for index in heads:
+        if index == 0:
+            continue
+        head = _RECAP_QUANTITY.match(lines[index])
+        if head is None:  # pragma: no cover - the index came from the same match
+            continue
+
+        label = " ".join(lines[index - 1].split()).strip(_LABEL_EDGES)[:MAX_RAW_LABEL].strip()
+        # The same three refusals the line reader applies, for the same reason:
+        # a name that is really receipt furniture, a name too short to identify
+        # anything, and a "name" that is actually the previous article's price
+        # row. Any of them would put an unnamed or misnamed lot in a cupboard.
+        if len(label) < _MIN_LABEL_CHARS or not any(char.isalpha() for char in label):
+            continue
+        if _is_furniture(_fold(label)):
+            continue
+        if _RECAP_PRICES.match(label) or _RECAP_QUANTITY.match(label):
+            continue
+
+        prices = _RECAP_PRICES.match(head.group("rest"))
+        offset = index
+        while prices is None and offset - index < _RECAP_PRICE_WINDOW:
+            offset += 1
+            if offset >= len(lines):
+                break
+            prices = _RECAP_PRICES.match(lines[offset])
+        if prices is None:
+            continue
+
+        total_price = _amount(prices.group("total"), quantum=_CENTS)
+        unit_price = _amount(prices.group("unit"), quantum=_CENTS)
+        if total_price is None:
+            continue
+
+        read.append(
+            ReceiptLine(
+                label=label,
+                quantity=Decimal(int(head.group("count"))),
+                unit="piece",
+                unit_price=unit_price,
+                total_price=total_price,
+            )
+        )
+    return read
 
 
 def _find_total(lines: list[str]) -> Decimal | None:
@@ -613,7 +748,7 @@ def _read_line(raw: str) -> ReceiptLine | None:
     folded = _fold(text)
     if not folded or not any(char.isalpha() for char in folded):
         return None
-    if any(folded.startswith(prefix) for prefix in _NOT_A_PURCHASE):
+    if _is_furniture(folded):
         return None
 
     total_match = _TRAILING_TOTAL.search(text)
@@ -654,16 +789,11 @@ def parse_receipt_text(text: str, *, max_lines: int) -> tuple[ParsedReceipt, boo
     exists once rather than twice.
     """
     raw_lines = [line for line in text.splitlines() if line.strip()]
-    read: list[ReceiptLine] = []
-    truncated = False
-    for raw in raw_lines:
-        line = _read_line(raw)
-        if line is None:
-            continue
-        if len(read) >= max_lines:
-            truncated = True
-            break
-        read.append(line)
+    candidates = _read_recap_blocks(raw_lines) or [
+        line for raw in raw_lines if (line := _read_line(raw)) is not None
+    ]
+    read = candidates[:max_lines]
+    truncated = len(candidates) > max_lines
 
     purchased = _find_purchased_at(text)
     merchant = _find_merchant(raw_lines)
