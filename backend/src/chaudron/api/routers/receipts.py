@@ -206,6 +206,10 @@ class ConfirmReceiptLineIn(StrictModel):
     product_id: uuid.UUID | None = None
     label: Annotated[str | None, Field(default=None, max_length=200)] = None
     quantity: ConfirmQuantityIn | None = None
+    #: Where this one article goes. Omitted means "use the receipt's
+    #: ``location_id``", which is what every client sent before this field
+    #: existed, so the contract does not break.
+    location_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _one_target_only(self) -> ConfirmReceiptLineIn:
@@ -223,8 +227,9 @@ class ConfirmReceiptIn(StrictModel):
     """
 
     lines: Annotated[list[ConfirmReceiptLineIn], Field(max_length=MAX_CONFIRM_LINES)]
-    #: Where the stock goes. Optional: a household that has not set up storage
-    #: locations still gets its shopping into the inventory.
+    #: Where the stock goes by default. Optional: a household that has not set up
+    #: storage locations still gets its shopping into the inventory. A line may
+    #: override it with its own ``location_id`` -- a weekly shop is not one place.
     location_id: uuid.UUID | None = None
 
 
@@ -409,6 +414,7 @@ async def confirm_receipt(
                     label=line.label,
                     amount=None if line.quantity is None else line.quantity.amount,
                     unit_code=None if line.quantity is None else line.quantity.unit,
+                    location_id=line.location_id,
                 )
                 for line in payload.lines
             ],

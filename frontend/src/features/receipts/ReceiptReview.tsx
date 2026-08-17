@@ -73,6 +73,14 @@ export function ReceiptReview({ receipt, locations, onCancelled, onConfirmed }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Named, so each line can offer "— Placard (comme le reste)" instead of an
+  // anonymous default: a reviewer sorting fifty articles reads down the list,
+  // and needs to see at a glance which ones they have already moved.
+  const defaultLocationName = locations.find((one) => one.id === locationId)?.name ?? null;
+  const sortedElsewhere = lines.filter(
+    (line) => !line.removed && line.locationId !== null && line.locationId !== locationId,
+  ).length;
+
   const kept = lines.filter((line) => !line.removed);
   const invalidCount = kept.filter((line) => receiptDraftError(line) !== null).length;
   const withoutQuantity = kept.filter((line) => line.amount.trim() === '').length;
@@ -194,7 +202,14 @@ export function ReceiptReview({ receipt, locations, onCancelled, onConfirmed }: 
       )}
 
       {locations.length > 0 ? (
-        <Field label="Ranger les articles dans" hint="Vous pourrez les déplacer ensuite.">
+        <Field
+          label="Ranger les articles dans"
+          hint={
+            sortedElsewhere === 0
+              ? 'Chaque article peut aller ailleurs — voyez sa ligne.'
+              : `${String(sortedElsewhere)} article${sortedElsewhere > 1 ? 's ont' : ' a'} un rangement à part.`
+          }
+        >
           {({ id, describedBy }) => (
             <select
               id={id}
@@ -223,6 +238,8 @@ export function ReceiptReview({ receipt, locations, onCancelled, onConfirmed }: 
             line={line}
             position={index + 1}
             currency={receipt.currency}
+            locations={locations}
+            defaultLocationName={defaultLocationName}
             onChange={(next) => {
               update(line.id, next);
             }}

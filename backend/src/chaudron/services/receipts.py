@@ -731,7 +731,17 @@ class ReceiptImportService:
             kept.add(row.id)
             product_id, was_created = await self._resolve_target(household_id, line, row)
             created_products += int(was_created)
-            if await self._add_stock(household_id, line, row, product_id, location_id):
+            # The line's own destination when the reviewer set one, the
+            # confirmation's otherwise. Not validated here on purpose:
+            # ``InventoryService.add_item`` already checks the location against
+            # *this household* and raises ``LocationNotFoundError``, which
+            # ``api/errors.py`` renders as a problem response, and the whole
+            # call runs inside one ``session.begin()`` -- so a bad identifier
+            # rolls the confirmation back entirely rather than leaving half the
+            # shop put away. A second check here would buy nothing and would be
+            # one more place to keep in step with the tenancy rule.
+            destination = line.location_id if line.location_id is not None else location_id
+            if await self._add_stock(household_id, line, row, product_id, destination):
                 created_lots += 1
             row.matched_product_id = product_id
             row.match_status = ReceiptLineMatchStatus.CONFIRMED
