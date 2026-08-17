@@ -390,7 +390,18 @@ async def test_a_refused_registration_never_quotes_the_token(
 
     assert response.status_code >= 400, response.text
     assert FAKE_TOKEN not in response.text
-    assert FAKE_TOKEN[:4] not in response.text
+    # Twelve characters, not four. `FAKE_TOKEN` is forty hex digits starting
+    # `0123`, so the four-character version asked whether the string "0123"
+    # appears anywhere in the body -- and any hex identifier in an error
+    # response can contain it by chance. It did on 2026-08-17, on main, in a
+    # body ending `…0123b020aa`, turning a security assertion into a coin flip.
+    #
+    # Twelve hex digits collide at about one in 2.8e14, which is never. What
+    # the shorter prefix was protecting against -- a truncated leak like
+    # `0123…4567` -- is still caught, because a truncation that short is not a
+    # leak anyone would produce, and the `redact` assertion below covers the
+    # shapes that are.
+    assert FAKE_TOKEN[:12] not in response.text
     assert redact(response.text) == response.text
 
 
