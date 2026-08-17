@@ -335,6 +335,20 @@
   min-width: 0;
 }
 
+/* The kind and the date, on one row that wraps rather than shrinks: a date
+   input has a minimum comfortable width on every platform, and squeezing it
+   next to a select is how the day and the month stop being readable. */
+.adjusterDate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.adjusterDate > * {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
 .adjusterLabel {
   font-size: 0.78rem;
   font-weight: 600;
