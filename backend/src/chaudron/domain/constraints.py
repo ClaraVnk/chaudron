@@ -104,6 +104,57 @@ class MealTemperature(enum.StrEnum):
     COLD = "cold"
 
 
+class Effort(enum.StrEnum):
+    """How much cooking the household is willing to do tonight. A *preference*.
+
+    Not a filter, and it could not be one: no column in any catalogue says how
+    long a recipe takes. The model is told a budget and self-declares what it
+    proposes, and contract 4ter applies unchanged — a divergence between the
+    budget and the declaration is *displayed*, not prevented.
+
+    `QUICK` exists because the free-text note was carrying it badly. "vite fait"
+    competes with every other sentence in the block, and the block is untrusted
+    data: it reads as something a product label might have said. A structured
+    value is composed by the server, so it sits with the instructions.
+
+    The budget is deliberately three numbers rather than one. "Quick" collapses
+    otherwise into "few minutes", and a recipe with eleven ingredients and four
+    pans is not quick however fast each step is — the work a tired person is
+    avoiding is the shopping, the chopping and the washing-up as much as the
+    clock.
+    """
+
+    ANY = "any"
+    QUICK = "quick"
+
+
+class Appliance(enum.StrEnum):
+    """The machine the household wants to cook with tonight. A *preference*.
+
+    Per request rather than per household, and that is a real choice: a home
+    that owns a Thermomix does not use it for everything, and an appliance
+    recorded once as a household setting would silently rewrite every recipe
+    for it forever. Asking each time costs one control; guessing costs the
+    ability to cook without the machine.
+
+    It changes how steps are WRITTEN, never which recipes are eligible: the
+    same ratatouille is a pan and a spoon, or a speed and a temperature. So it
+    never filters, and a household that picks `NONE` is not asking for fewer
+    recipes — it is asking for the ordinary wording.
+
+    The list is closed because the instruction has to be specific to be worth
+    anything: a Thermomix step is a speed, a time and a temperature; a Cookeo
+    step is a pressure programme with its own timings. "Some robot" would give
+    the model licence to invent an interface that does not exist.
+    """
+
+    NONE = "none"
+    THERMOMIX = "thermomix"
+    MONSIEUR_CUISINE = "monsieur_cuisine"
+    COOKEO = "cookeo"
+    INSTANT_POT = "instant_pot"
+
+
 class DishKind(enum.StrEnum):
     """What kind of dish is wanted. A *preference*, like `MealTemperature`.
 

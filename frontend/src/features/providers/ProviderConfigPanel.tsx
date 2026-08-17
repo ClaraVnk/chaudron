@@ -409,6 +409,27 @@ function ConfiguredProvider({
         </Callout>
       ) : null}
 
+      {/*
+        Un membre non propriétaire voyait cette carte sans un seul bouton et
+        sans un mot d'explication : la phrase « seul un propriétaire peut le
+        faire » n'existait que dans le cas où AUCUNE configuration n'est
+        enregistrée. Demandé le 2026-08-17 par quelqu'un qui cherchait où
+        changer sa clé et concluait que l'option n'existait pas.
+
+        Une absence de commande sans raison se lit comme un défaut du logiciel,
+        pas comme une permission manquante — et c'est la lecture la plus coûteuse
+        des deux, parce qu'elle envoie chercher ailleurs.
+      */}
+      {!isOwner ? (
+        <Callout tone="info" title="Lecture seule">
+          <p>
+            Vous êtes membre de ce foyer, pas propriétaire : vous voyez comment il accède au modèle,
+            mais seuls les propriétaires peuvent remplacer la clé, retirer la configuration ou
+            modifier l’accord. Demandez à un propriétaire du foyer.
+          </p>
+        </Callout>
+      ) : null}
+
       {isOwner ? (
         <>
           {rotating ? (

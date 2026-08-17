@@ -1,11 +1,19 @@
-import type { DishKind, HouseholdMember, MealTemperature } from '../../api/types';
+import type {
+  Appliance,
+  DishKind,
+  Effort,
+  HouseholdMember,
+  MealTemperature,
+} from '../../api/types';
 import { Checkbox, ClassTag, Fieldset, Radio } from '../../components/ui';
 import { AllergenDisclaimer, InfantDisclaimer } from '../../components/SafetyNotice';
 import {
   AGE_BAND_LABELS,
   ALLERGEN_LABELS,
   DIET_LABELS,
+  APPLIANCE_LABELS,
   DISH_KIND_LABELS,
+  EFFORT_LABELS,
   MEAL_TEMPERATURE_LABELS,
   TEXTURE_LABELS,
 } from '../../lib/dietary';
@@ -20,9 +28,13 @@ interface Props {
   constraints: UnionConstraints;
   mealTemperature: MealTemperature;
   dishKind: DishKind;
+  effort: Effort;
+  appliance: Appliance;
   onToggleMember: (id: string, checked: boolean) => void;
   onMealTemperature: (value: MealTemperature) => void;
   onDishKind: (value: DishKind) => void;
+  onEffort: (value: Effort) => void;
+  onAppliance: (value: Appliance) => void;
 }
 
 /**
@@ -48,6 +60,10 @@ export function CookingForPanel({
   onToggleMember,
   onMealTemperature,
   onDishKind,
+  effort,
+  appliance,
+  onEffort,
+  onAppliance,
 }: Props) {
   const everyone = selectedIds.length === 0;
 
@@ -169,6 +185,54 @@ export function CookingForPanel({
               {DISH_KIND_LABELS[value]}
             </Radio>
           ))}
+        </Fieldset>
+
+        {/*
+          « Flemme » et non « rapide » : le mot décrit qui demande, pas la
+          recette. Le budget envoyé au modèle est triple — durée, nombre
+          d'ingrédients, nombre d'étapes — parce qu'un plat de onze ingrédients
+          dans quatre casseroles n'est pas rapide même si chaque geste l'est.
+          Ce qu'on évite, c'est la vaisselle autant que la montre.
+        */}
+        <Fieldset legend="Effort">
+          {(['any', 'quick'] as Effort[]).map((value) => (
+            <Radio
+              key={value}
+              name="effort"
+              value={value}
+              checked={effort === value}
+              onSelect={(next) => {
+                onEffort(next as Effort);
+              }}
+            >
+              {EFFORT_LABELS[value]}
+            </Radio>
+          ))}
+        </Fieldset>
+
+        {/*
+          Par requête et non par foyer, et c'est un choix : posséder un
+          Thermomix n'est pas vouloir s'en servir ce soir. Un réglage enregistré
+          une fois réécrirait toutes les recettes pour la machine, pour
+          toujours. Cela ne change que la rédaction des étapes — jamais quelles
+          recettes sont proposées.
+        */}
+        <Fieldset legend="Équipement">
+          {(['none', 'thermomix', 'monsieur_cuisine', 'cookeo', 'instant_pot'] as Appliance[]).map(
+            (value) => (
+              <Radio
+                key={value}
+                name="appliance"
+                value={value}
+                checked={appliance === value}
+                onSelect={(next) => {
+                  onAppliance(next as Appliance);
+                }}
+              >
+                {APPLIANCE_LABELS[value]}
+              </Radio>
+            ),
+          )}
         </Fieldset>
 
         {constraints.preferences.length > 0 ? (

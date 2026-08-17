@@ -408,6 +408,10 @@ export type MemberDraft = Omit<HouseholdMember, 'id'>;
 /** Third-class constraint (§4bis): a preference sent to the model, never a filter. */
 export type MealTemperature = 'any' | 'hot' | 'cold';
 export type DishKind = 'any' | 'savoury' | 'pastry';
+/** Combien de travail le foyer accepte ce soir. Préférence, jamais un filtre. */
+export type Effort = 'any' | 'quick';
+/** L'appareil pour lequel les étapes sont rédigées. Change la prose, pas l'éligibilité. */
+export type Appliance = 'none' | 'thermomix' | 'monsieur_cuisine' | 'cookeo' | 'instant_pot';
 
 export type ServingTemperature = 'hot' | 'cold' | 'either';
 
@@ -527,6 +531,8 @@ export interface SuggestRecipesRequest {
   balance_mode: 'weekly' | 'off';
   meal_temperature: MealTemperature;
   dish_kind: DishKind;
+  effort: Effort;
+  appliance: Appliance;
 }
 
 export interface SuggestRecipesResponse {

@@ -71,7 +71,7 @@ __all__ = [
 #: ``recipes-3`` the first that carries the computed weekly shortfall and the
 #: closed staple list of ADR-0009, and ``recipes-4`` the first that marks the
 #: household's frozen stock and states what thawing costs.
-PROMPT_VERSION: Final = "recipes-4"
+PROMPT_VERSION: Final = "recipes-5"
 
 #: The marker lines the untrusted JSON document sits between. Safe as delimiters
 #: only because every value inside is sanitised to a single line first: a value
@@ -311,6 +311,54 @@ def recipe_user_prompt(request: RecipeRequest, inventory: tuple[InventoryItem, .
         )
     elif request.dish_kind == "savoury":
         lines.append("The household wants a savoury dish rather than baking.")
+    if request.effort == "quick":
+        # Three numbers, not one. "Quick" alone collapses into "few minutes",
+        # and a dish with eleven ingredients and four pans is not quick however
+        # fast each step is: the work being avoided is the chopping and the
+        # washing-up as much as the clock.
+        lines.append(
+            "The household is tired and wants the least possible work: at most "
+            "30 minutes from start to plate, at most 6 ingredients counting "
+            "pantry staples, at most 5 steps, and as few pans and bowls as the "
+            "dish allows. Prefer one pan over two. If nothing in the inventory "
+            "can be made within that budget, say so plainly rather than "
+            "proposing something longer and calling it quick."
+        )
+    if request.appliance != "none":
+        # Server-composed like every line in this block, and specific on
+        # purpose: a generic "use their robot" invites the model to invent an
+        # interface. Each appliance below is named with what its steps actually
+        # consist of.
+        instructions = {
+            "thermomix": (
+                "Write the steps for a Thermomix. Give the speed, the "
+                "temperature and the time for each one, in that machine's own "
+                "terms, and use the reverse blade where a dish would otherwise "
+                "be shredded."
+            ),
+            "monsieur_cuisine": (
+                "Write the steps for a Monsieur Cuisine (Lidl). Give the speed, "
+                "the temperature and the time for each one. Do not assume "
+                "Thermomix-only programmes exist on it."
+            ),
+            "cookeo": (
+                "Write the steps for a Cookeo. Say which mode each step uses — "
+                "browning, pressure cooking, slow cooking — and give pressure "
+                "times, which are not the times the same dish takes in a pan."
+            ),
+            "instant_pot": (
+                "Write the steps for an Instant Pot. Say which mode each step "
+                "uses — saute, pressure, slow cook — give the pressure time, "
+                "and say whether the release is quick or natural."
+            ),
+        }
+        instruction = instructions.get(request.appliance)
+        if instruction is not None:
+            lines.append(
+                instruction + " The dish itself does not change: this decides how the "
+                "steps are written, not what is cooked. If the dish is a poor "
+                "fit for the machine, say so and give the ordinary method."
+            )
     if request.infant_texture is not None:
         lines.append(
             "A young child eats this meal. Required texture: "

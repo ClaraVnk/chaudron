@@ -4,7 +4,9 @@ import { getBalance, getSuggestionQuality, suggestRecipes } from '../../api/endp
 import type {
   AppliedConstraints,
   HouseholdMember,
+  Appliance,
   DishKind,
+  Effort,
   MealTemperature,
   RecipeSuggestion,
   StorageLocation,
@@ -181,6 +183,10 @@ export function RecipesScreen({ locations, members }: Props) {
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [mealTemperature, setMealTemperature] = useState<MealTemperature>(readMealTemperature);
   const [dishKind, setDishKind] = useState<DishKind>('any');
+  // Deux préférences de plus, du même ordre que les deux au-dessus : composées
+  // par le serveur, transmises au modèle, jamais appliquées comme filtre.
+  const [effort, setEffort] = useState<Effort>('any');
+  const [appliance, setAppliance] = useState<Appliance>('none');
   const [suggestions, setSuggestions] = useState<RecipeSuggestion[] | null>(null);
   const [applied, setApplied] = useState<AppliedConstraints | null>(null);
   const [balance, setBalance] = useState<WeeklyBalance | null>(null);
@@ -260,6 +266,8 @@ export function RecipesScreen({ locations, members }: Props) {
       balance_mode: 'weekly',
       meal_temperature: mealTemperature,
       dish_kind: dishKind,
+      effort,
+      appliance,
     })
       .then((response) => {
         setSuggestions(response.suggestions);
@@ -338,6 +346,8 @@ export function RecipesScreen({ locations, members }: Props) {
                 constraints={constraints}
                 mealTemperature={mealTemperature}
                 dishKind={dishKind}
+                effort={effort}
+                appliance={appliance}
                 onToggleMember={(id, checked) => {
                   setSelectedMembers((current) =>
                     checked ? [...current, id] : current.filter((value) => value !== id),
@@ -345,6 +355,8 @@ export function RecipesScreen({ locations, members }: Props) {
                 }}
                 onMealTemperature={chooseTemperature}
                 onDishKind={setDishKind}
+                onEffort={setEffort}
+                onAppliance={setAppliance}
               />
             )}
 
