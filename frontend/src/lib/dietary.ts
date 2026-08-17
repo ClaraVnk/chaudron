@@ -7,9 +7,11 @@
 import type {
   AgeBand,
   AllergenCode,
+  Appliance,
   AvoidedIngredientCode,
   Diet,
   DishKind,
+  Effort,
   HouseholdMember,
   InfantTexture,
   MealTemperature,
@@ -105,6 +107,29 @@ export const DISH_KIND_LABELS: Record<DishKind, string> = {
   any: 'Indifférent',
   savoury: 'Salé',
   pastry: 'Pâtisserie',
+};
+
+/**
+ * « Flemme » plutôt que « rapide » : le mot décrit l'état de qui demande, pas
+ * une propriété de la recette. Personne ne cherche « un plat rapide » — on
+ * cherche à ne rien faire, et la recette rapide est la conséquence.
+ */
+export const EFFORT_LABELS: Record<Effort, string> = {
+  any: 'Peu importe',
+  quick: "Flemme — vite fait, peu d'ingrédients",
+};
+
+/**
+ * Nommés par leur marque, parce que c'est ainsi qu'on les possède. « Robot
+ * cuiseur » ne dit pas si l'appareil monte en pression, et c'est précisément
+ * ce qui change les étapes.
+ */
+export const APPLIANCE_LABELS: Record<Appliance, string> = {
+  none: 'Aucun — méthode classique',
+  thermomix: 'Thermomix',
+  monsieur_cuisine: 'Monsieur Cuisine (Lidl)',
+  cookeo: 'Cookeo',
+  instant_pot: 'Instant Pot',
 };
 
 export const SERVING_TEMPERATURE_LABELS: Record<ServingTemperature, string> = {

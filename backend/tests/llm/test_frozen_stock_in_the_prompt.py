@@ -94,5 +94,10 @@ def test_the_instruction_is_in_the_stable_prefix_and_not_in_the_user_turn() -> N
 
 
 def test_the_prompt_version_records_the_change() -> None:
-    """ "The suggestions got worse last week" is unanswerable without this."""
-    assert PROMPT_VERSION == "recipes-4"
+    """ "The suggestions got worse last week" is unanswerable without this.
+
+    Bumped to `recipes-5` on 2026-08-17, when the effort budget and the
+    appliance instructions were added. The guard did its job: the change was
+    caught here, not in a support conversation three weeks later.
+    """
+    assert PROMPT_VERSION == "recipes-5"

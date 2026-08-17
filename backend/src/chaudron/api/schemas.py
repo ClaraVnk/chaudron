@@ -665,6 +665,14 @@ class SuggestRecipesIn(StrictModel):
     #: A preference like the one above, never a filter: nothing in the catalogue
     #: says a product is for baking, so there is no predicate to apply.
     dish_kind: Literal["any", "savoury", "pastry"] = "any"
+    #: How much work the household is willing to do. A preference; nothing
+    #: measures a recipe's duration before it is written.
+    effort: Literal["any", "quick"] = "any"
+    #: Which machine the steps should be written for. Per request rather than a
+    #: household setting: owning a Thermomix is not the same as wanting to use
+    #: it tonight, and a setting recorded once would rewrite every recipe for it
+    #: forever.
+    appliance: Literal["none", "thermomix", "monsieur_cuisine", "cookeo", "instant_pot"] = "none"
 
 
 class TokenUsageOut(BaseModel):

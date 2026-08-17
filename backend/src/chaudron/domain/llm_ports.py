@@ -331,6 +331,12 @@ class RecipeRequest:
     meal_temperature: str = "any"
     #: "any" | "savoury" | "pastry". A preference, never a filter.
     dish_kind: str = "any"
+    #: "any" | "quick". A time and effort budget; a preference, never a filter,
+    #: because nothing measures how long a recipe takes before it is written.
+    effort: str = "any"
+    #: The appliance the steps should be written for, or "none" for ordinary
+    #: wording. Changes the prose, never the eligibility.
+    appliance: str = "none"
     #: How the food has to be served when a young child is at the table. Carried
     #: as a preparation requirement rather than as a filter: no catalogue column
     #: says whether a product can be pureed.
