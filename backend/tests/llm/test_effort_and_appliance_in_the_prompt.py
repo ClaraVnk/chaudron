@@ -21,8 +21,13 @@ from chaudron.infra.llm.prompts import recipe_user_prompt
 INVENTORY = (InventoryItem(name="Pommes"),)
 
 
-def _prompt(**kwargs: str) -> str:
-    return recipe_user_prompt(RecipeRequest(inventory=INVENTORY, **kwargs), INVENTORY)
+def _prompt(*, effort: str = "any", appliance: str = "none") -> str:
+    # Explicit parameters rather than **kwargs: the latter makes the call
+    # untyped, so mypy reports the return as `Any` and the annotation stops
+    # meaning anything. Two named arguments also say what this helper varies.
+    request = RecipeRequest(inventory=INVENTORY, effort=effort, appliance=appliance)
+    prompt: str = recipe_user_prompt(request, INVENTORY)
+    return prompt
 
 
 def test_defaults_say_nothing_about_effort_or_appliance() -> None:
