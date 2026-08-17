@@ -45,6 +45,14 @@ export interface ReceiptDraftLine {
   suggestedMatch: boolean;
   /** Removed from the review. Kept in the list so the removal is undoable. */
   removed: boolean;
+  /**
+   * Where this article goes, or `null` for "wherever the rest of the shop goes".
+   *
+   * `null` rather than a copy of the receipt-wide choice, so that changing that
+   * choice still moves every line that was never singled out. Copying it into
+   * each line at load time would freeze fifty decisions the reviewer never made.
+   */
+  locationId: string | null;
 }
 
 export function toReceiptDrafts(lines: ReceiptLine[]): ReceiptDraftLine[] {
@@ -60,6 +68,7 @@ export function toReceiptDrafts(lines: ReceiptLine[]): ReceiptDraftLine[] {
     totalPrice: line.total_price,
     suggestedMatch: line.match_status === 'suggested',
     removed: false,
+    locationId: null,
   }));
 }
 
@@ -104,6 +113,10 @@ export function receiptDraftError(line: ReceiptDraftLine): string | null {
  *
  * `product_id` and `label` are never both sent: the server would then hold a
  * catalogue name and a free text that disagree.
+ *
+ * `location_id` is sent only for the lines that were singled out. The rest
+ * inherit the receipt-wide choice server-side, so a reviewer who moves that
+ * choice after sorting a few lines still moves everything they did not touch.
  */
 export function toReceiptConfirmLines(lines: ReceiptDraftLine[]): ReceiptConfirmLine[] {
   return lines
@@ -112,8 +125,9 @@ export function toReceiptConfirmLines(lines: ReceiptDraftLine[]): ReceiptConfirm
       const amount = line.amount.trim() === '' ? null : normaliseAmount(line.amount);
       const unit = line.unit.trim();
       const quantity = amount !== null && unit !== '' ? { amount, unit } : undefined;
+      const where = line.locationId === null ? {} : { location_id: line.locationId };
       return line.productId !== null
-        ? { id: line.id, product_id: line.productId, quantity }
-        : { id: line.id, label: line.label.trim(), quantity };
+        ? { id: line.id, product_id: line.productId, quantity, ...where }
+        : { id: line.id, label: line.label.trim(), quantity, ...where };
     });
 }

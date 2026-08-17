@@ -292,6 +292,21 @@
   width: auto;
 }
 
+/* Where this article goes. Its own row rather than a third control squeezed in
+   beside the amount and the unit: on a phone those already wrap, and a picker
+   that lands under a number reads as belonging to it. */
+.lineWhere {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.lineLocation {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
 .linePrice {
   margin-left: auto;
   font-variant-numeric: tabular-nums;

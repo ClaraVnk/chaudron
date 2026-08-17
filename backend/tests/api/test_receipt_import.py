@@ -381,6 +381,103 @@ async def test_a_review_correction_and_a_removal_reach_the_stock(
     assert all(lot.source_receipt_line_id is not None for lot in lots)
 
 
+async def test_each_line_can_name_its_own_storage_location(
+    api_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    make_household: MakeHousehold,
+) -> None:
+    """A weekly shop is not one place.
+
+    Before this, ``confirm`` took a single ``location_id`` for the whole
+    receipt, so fifty articles landed in one cupboard and the reviewer moved
+    them one at a time afterwards -- undoing the work the review screen had just
+    saved. The review screen is the only moment the whole shop is on screen
+    together, which is where the distinction costs one tap.
+    """
+    household = await make_household()
+    headers = household_headers(household)
+    fridge = (
+        await api_client.post(
+            "/v1/locations", headers=headers, json={"name": "Frigo", "kind": "fridge"}
+        )
+    ).json()
+    cupboard = (
+        await api_client.post(
+            "/v1/locations", headers=headers, json={"name": "Placard", "kind": "pantry"}
+        )
+    ).json()
+
+    proposal = (await _import_recap(api_client, household)).json()
+    lines = proposal["lines"]
+
+    confirmed = await api_client.post(
+        f"/v1/receipts/{proposal['id']}/confirm",
+        json={
+            "location_id": cupboard["id"],
+            "lines": [
+                {"id": lines[0]["id"], "location_id": fridge["id"]},
+                {"id": lines[1]["id"]},
+                {"id": lines[2]["id"], "location_id": fridge["id"]},
+            ],
+        },
+        headers=headers,
+    )
+    assert confirmed.status_code == 201, confirmed.text
+
+    placed = sorted(
+        (
+            await db_session.scalars(
+                select(InventoryLot.storage_location_id).where(
+                    InventoryLot.household_id == household.id
+                )
+            )
+        ).all(),
+        key=str,
+    )
+    # Two in the fridge because they said so, one in the cupboard because they
+    # did not: the receipt-level value stays the default, so a client that has
+    # never heard of this field behaves exactly as before.
+    assert placed.count(uuid.UUID(fridge["id"])) == 2
+    assert placed.count(uuid.UUID(cupboard["id"])) == 1
+
+
+async def test_a_line_naming_another_household_s_location_writes_nothing(
+    api_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    make_household: MakeHousehold,
+) -> None:
+    """The tenancy check is ``add_item``'s, and the whole confirmation rolls back.
+
+    Not a partial put-away with a warning: the call runs inside one transaction,
+    so the reviewer retries a request that did nothing rather than hunting for
+    which half of their shop was filed.
+    """
+    household = await make_household()
+    stranger = await make_household()
+    elsewhere = (
+        await api_client.post(
+            "/v1/locations",
+            headers=household_headers(stranger),
+            json={"name": "Cave", "kind": "pantry"},
+        )
+    ).json()
+
+    proposal = (await _import_recap(api_client, household)).json()
+    refused = await api_client.post(
+        f"/v1/receipts/{proposal['id']}/confirm",
+        json={"lines": [{"id": proposal["lines"][0]["id"], "location_id": elsewhere["id"]}]},
+        headers=household_headers(household),
+    )
+
+    assert refused.status_code == 404, refused.text
+    lots = (
+        await db_session.scalars(
+            select(InventoryLot).where(InventoryLot.household_id == household.id)
+        )
+    ).all()
+    assert lots == []
+
+
 async def test_confirming_twice_is_refused_rather_than_doubling_the_stock(
     api_client: httpx.AsyncClient, make_household: MakeHousehold
 ) -> None:

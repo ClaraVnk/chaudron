@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import type { StorageLocation } from '../../api/types';
 import { Badge, Button } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
 import { unitOptions } from '../../lib/units';
@@ -15,6 +16,11 @@ interface Props {
   line: ReceiptDraftLine;
   position: number;
   currency: string | null;
+  /** The household's storage locations. Empty is a normal state, and then no
+   *  destination picker is shown at all. */
+  locations: StorageLocation[];
+  /** The name of the receipt-wide destination, shown as this line's default. */
+  defaultLocationName: string | null;
   onChange: (line: ReceiptDraftLine) => void;
   onToggleRemoved: () => void;
 }
@@ -48,7 +54,15 @@ function money(value: string | null, currency: string | null): string | null {
  * "produit inconnu", no guess: matching is exact normalised equality, so a miss
  * says nothing about the article and the interface says nothing either.
  */
-export function ReceiptLineRow({ line, position, currency, onChange, onToggleRemoved }: Props) {
+export function ReceiptLineRow({
+  line,
+  position,
+  currency,
+  locations,
+  defaultLocationName,
+  onChange,
+  onToggleRemoved,
+}: Props) {
   const id = useId();
   const labelId = `${id}-label`;
   const errorId = `${id}-error`;
@@ -150,6 +164,39 @@ export function ReceiptLineRow({ line, position, currency, onChange, onToggleRem
             </select>
             {total === null ? null : <span className={styles.linePrice}>{total}</span>}
           </div>
+
+          {/* Where this article goes. Hidden entirely when the household has no
+              storage locations, which is a normal state rather than a gap to
+              nag about — the import works without any.
+
+              The first option is the receipt-wide choice, named rather than
+              called "défaut": a weekly shop is sorted by reading down the list,
+              and a reviewer comparing "Frigo" to "— comme le reste" cannot tell
+              at a glance which lines they have already handled. */}
+          {locations.length === 0 ? null : (
+            <div className={styles.lineWhere}>
+              <select
+                className={[controlClass(), styles.lineLocation].join(' ')}
+                aria-label={`Rangement, article ${String(position)}`}
+                value={line.locationId ?? ''}
+                onChange={(event) => {
+                  const chosen = event.target.value;
+                  onChange({ ...line, locationId: chosen === '' ? null : chosen });
+                }}
+              >
+                <option value="">
+                  {defaultLocationName === null
+                    ? '— comme le reste du ticket'
+                    : `— ${defaultLocationName} (comme le reste)`}
+                </option>
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {error === null ? null : (
             <p className={styles.lineError} id={errorId} role="alert">

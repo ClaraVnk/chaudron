@@ -268,6 +268,17 @@ class ConfirmReceiptLine:
     label: str | None = None
     amount: Decimal | None = None
     unit_code: str | None = None
+    #: Where this article goes, when the reviewer said something different from
+    #: the rest of the shop. ``None`` means "whatever the confirmation chose",
+    #: which is what every existing client sends.
+    #:
+    #: A weekly shop is not one place: fifty articles land in the fridge, the
+    #: freezer and the cupboard, and a single destination for the receipt turned
+    #: the review screen's saved work into an evening of moving lots one at a
+    #: time. The review screen is the only moment the whole shop is on screen
+    #: together, so it is where the distinction costs one tap instead of one
+    #: navigation.
+    location_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

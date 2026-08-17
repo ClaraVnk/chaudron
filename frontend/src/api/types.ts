@@ -921,6 +921,12 @@ export interface ReceiptConfirmLine {
   product_id?: string;
   label?: string;
   quantity?: { amount: string; unit: string };
+  /**
+   * Where this one article goes, when it is not where the rest of the shop
+   * goes. Omitted means "use the receipt's `location_id`", so a body written
+   * before this field existed behaves exactly as it did.
+   */
+  location_id?: string;
 }
 
 export interface ReceiptConfirmResult {
