@@ -119,6 +119,44 @@
   --ok-subtle: #e8f5ee;
 
   --focus-ring: #1d4ed8;
+
+  /* ----------------------------------------------------------------------- *
+   * Glass, and why the tint is nearly opaque
+   *
+   * The header and the navigation float over scrolling content. Painted with a
+   * flat `--surface` they read as two lids sitting on the page; blurred, they
+   * read as one sheet of glass the content passes beneath — which is the whole
+   * point, because it tells you at a glance that they are chrome and not
+   * content.
+   *
+   * The alpha is 0.82, not the 0.6 that looks best in a screenshot. The header
+   * carries the wordmark and the tagline, and the nav carries six labels: text
+   * whose contrast has to stay a number someone can state. At 0.6 the ground
+   * becomes whatever scrolled under it, and that number stops existing.
+   *
+   * Measured at 0.82, worst case being saturated amber passing underneath:
+   *
+   *   light  ink #22242a on glass over #f59e0b  ->  13.55:1
+   *   dark   ink #f2f2f0 on glass over #f59e0b  ->  11.37:1
+   *
+   * Against the page itself both sit above 15:1. AA wants 4.5:1, so the effect
+   * costs about a tenth of the headroom and none of the compliance.
+   *
+   * `--glass-edge` is a highlight on the top edge only. A one-pixel lighter
+   * line is what separates "translucent panel" from "faded panel"; it is how
+   * the eye decides the surface has a thickness.
+   * ----------------------------------------------------------------------- */
+  --glass: rgb(255 255 255 / 82%);
+  --glass-edge: rgb(255 255 255 / 90%);
+  --glass-blur: 16px;
+  --glass-saturate: 180%;
+
+  /* A warm bleed from the top-right, in the ember the whole palette is built
+     on. Fixed to the viewport so it stays put while content scrolls: it is
+     lighting, not decoration that travels with the page. Kept under 6% — above
+     that it stops being light and starts being a coloured background, and the
+     surfaces lose the gap that makes them look raised. */
+  --aurora: rgb(245 158 11 / 5%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -146,6 +184,18 @@
     --ok-subtle: #16302a;
 
     --focus-ring: #93c5fd;
+
+    /* Dark glass is a DARKENING veil, not a lightening one: on a dark ground a
+       white tint turns the chrome into a grey slab and loses the depth the
+       blur just bought. The edge highlight stays white but drops to 10% — the
+       same trick, an order of magnitude quieter, because the contrast against
+       what it sits on is that much greater. */
+    --glass: rgb(23 24 28 / 82%);
+    --glass-edge: rgb(255 255 255 / 10%);
+
+    /* Slightly stronger, because a dark surface reflects less of the light the
+       aurora is meant to represent — at 5% it simply disappears here. */
+    --aurora: rgb(245 158 11 / 8%);
 
     /* Pure black in the dark theme: there is no warm surface left to tint
        against, and a coloured shadow on a dark ground reads as a halo. */
