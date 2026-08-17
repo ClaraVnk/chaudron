@@ -15,6 +15,7 @@ import { ExportTargetPanel } from './ExportTargetPanel';
 import { HouseholdAccessPanel } from './HouseholdAccessPanel';
 import { JoinHouseholdPanel } from './JoinHouseholdPanel';
 import { MachineTokenPanel } from './MachineTokenPanel';
+import { ProviderConfigPanel } from '../providers/ProviderConfigPanel';
 import { MemberForm } from './MemberForm';
 import styles from './Household.module.css';
 
@@ -256,6 +257,23 @@ export function HouseholdScreen({ state }: Props) {
           screen that is not about the household currently selected: it is where
           somebody who was handed a code turns it into a second household. */}
       <HouseholdAccessPanel />
+      {/* The provider configuration lives here, and it did not before. It was
+          reachable ONLY through `RecipesScreen`, which renders it when
+          `providerMissing` is true — so the moment a household's key started
+          working, the screen that owns it disappeared, taking with it the only
+          way to replace that key, withdraw the consent, or even read what was
+          recorded.
+
+          A first-run screen was doing duty as the permanent home of a
+          permanent setting. Reported three times by an owner looking for where
+          to change an API key; I spent three wrong hypotheses on why a button
+          was hidden before checking whether the page was reachable at all.
+
+          Here, next to the two other credential panels, and above them because
+          it is the one that costs money. The comment at the top of this file
+          already gives the rule: this is the only settings surface the
+          application has. */}
+      <ProviderConfigPanel />
       <ExportTargetPanel />
       <MachineTokenPanel />
       <JoinHouseholdPanel />
