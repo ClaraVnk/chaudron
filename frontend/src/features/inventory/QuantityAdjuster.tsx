@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { describeError } from '../../api/client';
 import { updateInventoryItem } from '../../api/endpoints';
 import type {
+  ExpiryKind,
   InventoryItem,
   InventoryItemPatch,
   StorageLocation,
@@ -42,6 +43,15 @@ export function QuantityAdjuster({ item, locations, onSaved, onCancel }: Props) 
   // wrong location is not cosmetic — the freezer suspends the expiry date, so
   // an item put there by mistake stops being counted as perishable.
   const [locationId, setLocationId] = useState(item.location?.id ?? '');
+  // The date, and what kind of date it is. Both are corrections rather than
+  // decorations: a receipt import has no date to read -- a drive recap prints
+  // none -- and `_add_stock` files every imported lot as `best_before`. So a
+  // weekly shop arrives with minced meat labelled the way dry pasta is, and
+  // `domain/models.ExpiryDateKind` says exactly what that costs: "anxious
+  // alerts on dry pasta, or silence on minced meat". Correcting the date
+  // without the kind would leave half of that in place.
+  const [expiresOn, setExpiresOn] = useState(item.expires_on ?? '');
+  const [expiryKind, setExpiryKind] = useState<ExpiryKind | ''>(item.expiry_kind ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -68,6 +78,15 @@ export function QuantityAdjuster({ item, locations, onSaved, onCancel }: Props) 
     const patch: InventoryItemPatch = { amount };
     if (locationId !== '' && locationId !== (item.location?.id ?? '')) {
       patch.location_id = locationId;
+    }
+    // An emptied field is `null`, not "unchanged": clearing a date somebody
+    // mistyped has to be possible, and the server distinguishes the two by
+    // whether the key is present at all (`model_fields_set`).
+    if (expiresOn !== (item.expires_on ?? '')) {
+      patch.expires_on = expiresOn === '' ? null : expiresOn;
+    }
+    if (expiryKind !== (item.expiry_kind ?? '')) {
+      patch.expiry_kind = expiryKind === '' ? null : expiryKind;
     }
     updateInventoryItem(item.id, patch)
       .then(onSaved)
@@ -121,6 +140,42 @@ export function QuantityAdjuster({ item, locations, onSaved, onCancel }: Props) 
           </select>
         </div>
       ) : null}
+
+      {/* The date and what kind of date it is, side by side because they are one
+          fact: "23/08" means nothing until you know whether it is a safety limit
+          or a quality one. Placed after the location because moving a lot to the
+          freezer suspends the date anyway, so the order matches the order the
+          decisions are made in. */}
+      <div className={styles.adjusterField}>
+        <label className={styles.adjusterLabel} htmlFor={`${inputId}-expiry-kind`}>
+          Date de péremption
+        </label>
+        <div className={styles.adjusterDate}>
+          <select
+            id={`${inputId}-expiry-kind`}
+            className={controlClass()}
+            aria-label="Type de date"
+            value={expiryKind}
+            onChange={(event) => {
+              setExpiryKind(event.target.value as ExpiryKind | '');
+            }}
+          >
+            <option value="">Type non précisé</option>
+            <option value="use_by">DLC — à consommer jusqu’au</option>
+            <option value="best_before">DDM — de préférence avant le</option>
+          </select>
+          <input
+            id={`${inputId}-expiry`}
+            className={controlClass()}
+            type="date"
+            aria-label="Date de péremption"
+            value={expiresOn}
+            onChange={(event) => {
+              setExpiresOn(event.target.value);
+            }}
+          />
+        </div>
+      </div>
 
       <div className={styles.adjusterRow}>
         <Button
