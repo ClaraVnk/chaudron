@@ -119,10 +119,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setHouseholdId(null);
   }, []);
 
-  const activeHousehold = useMemo<HouseholdSummary | null>(
-    () => session?.households.find((entry) => entry.id === householdId) ?? null,
-    [session, householdId],
-  );
+  const activeHousehold = useMemo<HouseholdSummary | null>(() => {
+    const households = session?.households ?? [];
+    const chosen = households.find((entry) => entry.id === householdId);
+    if (chosen !== undefined) return chosen;
+    // A single household IS the active one, whether or not it was ever picked
+    // explicitly. `api/client.ts` already works this way -- it omits
+    // `X-Household-Id` when nothing is selected and lets the server resolve the
+    // only membership -- so without this fallback the server and the interface
+    // disagree about which household the user is looking at.
+    //
+    // The consequence was not cosmetic. `isOwner` is computed from this value,
+    // so an owner with one household and no explicit selection was treated as a
+    // member: the provider card rendered, every button was hidden, and the
+    // screen offered no way to change an API key. Reported on 2026-08-17 by
+    // someone who owned the household and concluded the option did not exist.
+    return households.length === 1 ? (households[0] ?? null) : null;
+  }, [session, householdId]);
 
   const value = useMemo<SessionState>(
     () => ({ session, loading, activeHousehold, adopt, selectHousehold, signOut }),
