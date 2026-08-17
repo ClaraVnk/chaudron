@@ -69,6 +69,14 @@ _TRAILING_TOTAL: Final = re.compile(
     rf"(?P<amount>{_AMOUNT})\s*(?:€|EUR)?\s*(?:[A-Z]\b)?\s*$", re.IGNORECASE
 )
 
+#: A line that is an amount and nothing else, and a line that is a caption and
+#: nothing else. Together they recognise the two-column summary a drive recap
+#: ends with -- see ``_find_total``. Both are anchored at each end: a line
+#: carrying anything besides an amount is a purchase, a VAT row or a payment
+#: line, and none of those is the total.
+_BARE_AMOUNT: Final = re.compile(rf"^\s*(?P<amount>{_AMOUNT})\s*(?:€|EUR)?\s*$", re.IGNORECASE)
+_CAPTION: Final = re.compile(rf"^(?!\s*{_AMOUNT}\s*$).*:\s*$")
+
 #: A quantity with its unit. A bare number is never one: on a receipt the same
 #: digits are as likely to be a pack size, a till number or a queue position.
 _MEASURE: Final = r"(?P<qty>\d{1,5}(?:[.,]\d{1,3})?)\s*(?P<unit>kg|g|cl|ml|l)\b"
@@ -214,6 +222,50 @@ _NOT_A_PURCHASE: Final = tuple(
 #: months rather than fail.
 _DATE: Final = re.compile(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})\b")
 
+#: The same date spelled out. A till roll prints "02/08/2026"; a drive recap is
+#: a web page and writes "12 aout 2026" -- the only form on the operator's own
+#: recap, measured 2026-08-17, which is why it imported with no date at all.
+#:
+#: Matched against the *raw* text, with the accents written into the pattern
+#: rather than folded out of the document. ``_fold`` normalises to NFKD and
+#: collapses runs of spaces, so its offsets do not line up with the original --
+#: and this function goes back to the text after the match to look for a clock.
+_MONTHS: Final = (
+    "janvier",
+    "fevrier",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "aout",
+    "septembre",
+    "octobre",
+    "novembre",
+    "decembre",
+)
+_MONTH_PATTERNS: Final = (
+    "janvier",
+    "f[ée]vrier",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "ao[uû]t",
+    "septembre",
+    "octobre",
+    "novembre",
+    "d[ée]cembre",
+)
+_SPELLED_DATE: Final = re.compile(
+    rf"\b(\d{{1,2}})(?:\s*er)?\s+({'|'.join(_MONTH_PATTERNS)})\s+(\d{{4}})\b",
+    re.IGNORECASE,
+)
+#: Accented letters back to their plain form, one to one, so the captured month
+#: can be looked up in ``_MONTHS``.
+_STRIP_ACCENTS: Final = str.maketrans("éèêëûùôàçîï", "eeeeuuoacii")
+
 _TIME: Final = re.compile(r"\b([01]?\d|2[0-3])[:hH]([0-5]\d)\b")
 
 #: Chains whose printed name maps onto a ``domain/labels`` retailer slug. Only
@@ -339,19 +391,75 @@ def _find_total(lines: list[str]) -> Decimal | None:
     The *last*, because a drive recap prints an order summary at the top and the
     amount actually charged at the bottom, and the bottom one is the one the card
     was debited for.
+
+    The amount is looked for on the label's own line first, and failing that in
+    the summary table described by ``_column_total``.
     """
     found: Decimal | None = None
-    for line in lines:
+    for index, line in enumerate(lines):
         folded = _fold(line)
         if not _TOTAL_LINE.match(folded) or _NOT_A_TOTAL.search(folded):
             continue
         match = _TRAILING_TOTAL.search(line)
-        if match is None:
-            continue
-        value = _amount(match.group("amount"), quantum=_CENTS)
+        value = (
+            _amount(match.group("amount"), quantum=_CENTS)
+            if match is not None
+            else _column_total(lines, index)
+        )
         if value is not None and value > 0:
             found = value
     return found
+
+
+def _column_total(lines: list[str], index: int) -> Decimal | None:
+    """The amount belonging to a caption in a two-column summary table.
+
+    A till receipt prints "TOTAL   48,10 €" on one line. A drive recap is a *web
+    page laid out in columns*, and extracting its text walks each column in
+    turn, so a run of captions is followed by a run of amounts:
+
+        Montant du panier :          <- caption 0
+        Frais de livraison :         <- caption 1
+        Economies realisees :        <- caption 2
+        225,37 EUR                   <- amount 0
+        12,96 EUR                    <- amount 1
+        1,83 EUR                     <- amount 2
+
+    The amount is therefore at the caption's *own offset* within its block, not
+    on the next line. The operator's 8-page recap, measured 2026-08-17, ends
+    with a two-caption block whose totals read "1,81" then "223,54": taking the
+    next line would have recorded a 1,81 discount as a 223,54 shop, in the one
+    field the budget counts, with nothing on screen to say so.
+
+    The two runs must be the **same length**. That equality is the whole safety
+    property: it is what says the extraction really did emit a clean table
+    rather than a caption that happens to sit above unrelated numbers. When
+    they differ this returns None and the total stays honestly missing, which
+    the review screen can show -- unlike a confident wrong number.
+    """
+    if not _CAPTION.match(lines[index]):
+        return None
+
+    start = index
+    while start > 0 and _CAPTION.match(lines[start - 1]):
+        start -= 1
+    end = index
+    while end + 1 < len(lines) and _CAPTION.match(lines[end + 1]):
+        end += 1
+
+    amounts: list[Decimal] = []
+    for line in lines[end + 1 :]:
+        match = _BARE_AMOUNT.match(line)
+        if match is None:
+            break
+        value = _amount(match.group("amount"), quantum=_CENTS)
+        if value is None:
+            break
+        amounts.append(value)
+
+    if len(amounts) != end - start + 1:
+        return None
+    return amounts[index - start]
 
 
 def _find_currency(text: str) -> str | None:
@@ -376,11 +484,23 @@ def _find_purchased_at(text: str) -> dt.datetime | None:
     Naive on purpose: the receipt prints a wall clock, and the household's zone
     is applied by the caller. Pretending it is UTC would move an evening shop to
     the next day for a fifth of Europe.
+
+    Numeric first, spelled-out second, and *whichever comes earlier in the
+    document* wins -- a recap that carries both prints the order date before the
+    invoice footer.
     """
-    match = _DATE.search(text)
-    if match is None:
+    numeric = _DATE.search(text)
+    spelled = _SPELLED_DATE.search(text)
+    if numeric is not None and (spelled is None or numeric.start() <= spelled.start()):
+        match: re.Match[str] = numeric
+        day, month, year = (int(part) for part in match.groups())
+    elif spelled is not None:
+        match = spelled
+        day = int(spelled.group(1))
+        month = _MONTHS.index(spelled.group(2).lower().translate(_STRIP_ACCENTS)) + 1
+        year = int(spelled.group(3))
+    else:
         return None
-    day, month, year = (int(part) for part in match.groups())
     if year < 100:
         year += 2000
     try:

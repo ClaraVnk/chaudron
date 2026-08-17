@@ -365,9 +365,22 @@ class Settings(BaseSettings):
     #: image is not retained).
     receipt_import_max_bytes: int = Field(default=6 * 1024 * 1024, ge=1024)
 
-    #: Pages read from a drive order recap. A recap is one or two pages; five
-    #: covers a very large order and still bounds the work one request buys.
-    receipt_import_max_pdf_pages: int = Field(default=5, ge=1, le=100)
+    #: Pages read from a drive order recap.
+    #:
+    #: Was five, on the written assumption that "a recap is one or two pages".
+    #: A real one measured on 2026-08-17 is **eight** -- fifty lines of a weekly
+    #: family shop, printed as a web page rather than as a till roll. The
+    #: refusal sent its owner to the photo path, where a 424x414 export read
+    #: five lines out of fifty; the page ceiling, not the model, is what broke
+    #: that import.
+    #:
+    #: Twenty, because the page count was never the bound that mattered. The
+    #: work a request buys is bounded by ``receipt_import_max_text_chars`` and
+    #: by the sandbox's own memory and CPU ceilings, all of which apply
+    #: whatever the page count -- and the eight-page recap extracts to 8.8k
+    #: characters, under a tenth of that budget. Twenty is 2.5x the largest
+    #: document we have measured, which is headroom rather than a new guess.
+    receipt_import_max_pdf_pages: int = Field(default=20, ge=1, le=100)
 
     #: Characters of text extracted from a recap PDF, across the whole document.
     #: The only bound between a highly compressible PDF content stream and this

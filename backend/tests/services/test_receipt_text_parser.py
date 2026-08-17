@@ -125,6 +125,66 @@ def test_the_printed_total_is_the_one_the_customer_paid() -> None:
     assert parsed.total == Decimal("11.97")
 
 
+#: The shape a drive recap ends with: a run of captions, then a run of amounts,
+#: paired by position. Transcribed from the operator's own 8-page recap
+#: (2026-08-17) -- the layout that produced no total at all.
+_COLUMN_SUMMARY = "PAIN COMPLET  2,40\nAutre remise :\nTotal paye :\n1,81 €\n223,54 €\n"
+
+
+def test_a_total_read_from_a_two_column_summary_takes_its_own_row() -> None:
+    """Not the next line -- the amount at the caption's own offset.
+
+    Taking the next line would read the 1,81 discount as the price of the shop,
+    in the one field the budget counts, with nothing on screen to say so.
+    """
+    parsed, _ = parse_receipt_text(_COLUMN_SUMMARY, max_lines=200)
+    assert parsed.total == Decimal("223.54")
+
+
+def test_a_summary_whose_two_runs_disagree_yields_no_total() -> None:
+    """The equality between the runs is the whole safety property.
+
+    It is what says the extraction emitted a table rather than a caption
+    sitting above unrelated numbers. Without it, any amount following any
+    caption becomes a total. A missing total is recoverable on the review
+    screen; a confident wrong one is not.
+    """
+    parsed, _ = parse_receipt_text("Autre remise :\nTotal paye :\n223,54 €\n", max_lines=200)
+    assert parsed.total is None
+
+
+def test_a_caption_followed_by_a_purchase_line_yields_no_total() -> None:
+    """A purchase is not a bare amount, so the run of amounts is empty."""
+    parsed, _ = parse_receipt_text("Total paye :\nTOMATES PELEES  1,20\n", max_lines=200)
+    assert parsed.total is None
+
+
+def test_a_date_spelled_out_in_french_is_read() -> None:
+    """A till roll prints 02/08/2026; a drive recap is a web page.
+
+    The operator's own recap carries its date only in this form, which is why
+    it imported with no date at all.
+    """
+    for text, expected in (
+        ("Commande du 12 aout 2026\nPAIN 2,00\n", "2026-08-12"),
+        ("Commande du 1er février 2026\nPAIN 2,00\n", "2026-02-01"),
+        ("Retrait le 3 Décembre 2026\nPAIN 2,00\n", "2026-12-03"),
+    ):
+        parsed, _ = parse_receipt_text(text, max_lines=200)
+        assert parsed.purchased_on is not None, text
+        assert parsed.purchased_on.isoformat() == expected
+
+
+def test_a_numeric_date_still_wins_when_it_comes_first() -> None:
+    """Both forms on one document: the earlier one is the order, the later one
+    is footer boilerplate."""
+    parsed, _ = parse_receipt_text(
+        "Retrait le 02/08/2026\nPAIN 2,00\nFacture editee le 12 aout 2026\n", max_lines=200
+    )
+    assert parsed.purchased_on is not None
+    assert parsed.purchased_on.isoformat() == "2026-08-02"
+
+
 def test_the_date_the_merchant_and_the_currency_are_read() -> None:
     parsed, _ = parse_receipt_text(RECAP, max_lines=200)
     assert parsed.purchased_on is not None
