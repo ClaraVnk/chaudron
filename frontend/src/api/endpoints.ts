@@ -4,6 +4,7 @@ import type {
   BudgetHistory,
   BudgetPeriod,
   BudgetTarget,
+  CalendarSubscription,
   CreateInventoryItem,
   FrozenInventoryItem,
   HouseholdAccess,
@@ -684,6 +685,29 @@ export function redeemHouseholdInvitation(
   return request<RedeemedInvitation>('/auth/invitations/redeem', {
     method: 'POST',
     body: { token },
+    signal,
+  });
+}
+
+/**
+ * The CalDAV account details for this household. Owner only, server-side.
+ *
+ * Not cached anywhere: the response carries a live credential, and a copy kept
+ * in a store outlives the screen that needed it.
+ */
+export function getCalendarSubscription(signal?: AbortSignal): Promise<CalendarSubscription> {
+  return request<CalendarSubscription>('/calendar/subscription', { signal });
+}
+
+/**
+ * Issue new credentials, and with them stop every device already subscribed.
+ *
+ * Returns the replacement, so the screen shows what to re-enter rather than
+ * leaving the household with a feed nobody can reach.
+ */
+export function revokeCalendarSubscription(signal?: AbortSignal): Promise<CalendarSubscription> {
+  return request<CalendarSubscription>('/calendar/subscription/revoke', {
+    method: 'POST',
     signal,
   });
 }

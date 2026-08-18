@@ -262,3 +262,41 @@
   margin: 0;
   padding: 0;
 }
+
+/* CalDAV account details. Three values a person retypes into a phone by hand,
+   so they are set in a monospace face on their own lines: a server URL wrapped
+   mid-token by a proportional font is a value somebody mistypes once and then
+   blames the feature for. */
+.feedFacts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+}
+
+.feedFacts > dt {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.feedFacts > dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.feedFacts code {
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.hint {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}

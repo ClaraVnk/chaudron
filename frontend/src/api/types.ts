@@ -998,3 +998,22 @@ export interface RedeemedInvitation {
   household_name: string;
   role: MembershipRole;
 }
+
+/**
+ * What a person has to type into a phone to see expiry reminders, from
+ * `GET /v1/calendar/subscription`.
+ *
+ * `password` is a bearer credential the server returns here and nowhere else.
+ * It is not stored: it is re-derived per request from the instance key and the
+ * household's feed epoch, which is why revoking issues a new one rather than
+ * looking an old one up.
+ */
+export interface CalendarSubscription {
+  server_url: string;
+  username: string;
+  password: string;
+  calendar_url: string;
+  window_days_past: number;
+  window_days_future: number;
+  max_tasks: number;
+}

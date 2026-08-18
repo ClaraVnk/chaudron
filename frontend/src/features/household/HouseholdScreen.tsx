@@ -11,6 +11,7 @@ import {
   isInfantBand,
 } from '../../lib/dietary';
 import { AccountSecurityPanel } from './AccountSecurityPanel';
+import { CalendarFeedPanel } from './CalendarFeedPanel';
 import { ExportTargetPanel } from './ExportTargetPanel';
 import { HouseholdAccessPanel } from './HouseholdAccessPanel';
 import { JoinHouseholdPanel } from './JoinHouseholdPanel';
@@ -274,6 +275,7 @@ export function HouseholdScreen({ state }: Props) {
           already gives the rule: this is the only settings surface the
           application has. */}
       <ProviderConfigPanel />
+      <CalendarFeedPanel />
       <ExportTargetPanel />
       <MachineTokenPanel />
       <JoinHouseholdPanel />
