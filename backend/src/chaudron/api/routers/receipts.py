@@ -19,6 +19,7 @@ sentence a client receives is written in this file; the libraries' go to the log
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -43,6 +44,7 @@ from chaudron.domain.llm_ports import (
     ProviderResponseInvalid,
     ProviderUnavailable,
 )
+from chaudron.domain.models import ExpiryDateKind
 from chaudron.domain.ports import ProductNotFoundError
 from chaudron.domain.receipts import (
     ConfirmReceiptLine,
@@ -206,6 +208,11 @@ class ConfirmReceiptLineIn(StrictModel):
     product_id: uuid.UUID | None = None
     label: Annotated[str | None, Field(default=None, max_length=200)] = None
     quantity: ConfirmQuantityIn | None = None
+    #: The printed date and its kind. Omitted means "leave it alone", which is
+    #: what every client sent before these fields existed. A recap prints no
+    #: expiry, so this screen is the only moment the packet is still in hand.
+    expires_on: dt.date | None = None
+    expiry_kind: ExpiryDateKind | None = None
     #: Where this one article goes. Omitted means "use the receipt's
     #: ``location_id``", which is what every client sent before this field
     #: existed, so the contract does not break.
@@ -415,6 +422,8 @@ async def confirm_receipt(
                     amount=None if line.quantity is None else line.quantity.amount,
                     unit_code=None if line.quantity is None else line.quantity.unit,
                     location_id=line.location_id,
+                    expires_on=line.expires_on,
+                    expiry_kind=None if line.expiry_kind is None else line.expiry_kind.value,
                 )
                 for line in payload.lines
             ],

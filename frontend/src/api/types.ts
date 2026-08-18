@@ -927,6 +927,10 @@ export interface ReceiptConfirmLine {
    * before this field existed behaves exactly as it did.
    */
   location_id?: string;
+  /** The printed date, when the reviewer read it off the packet. */
+  expires_on?: string | null;
+  /** What kind of date that is. Omitted leaves the import's default. */
+  expiry_kind?: ExpiryKind | null;
 }
 
 export interface ReceiptConfirmResult {
