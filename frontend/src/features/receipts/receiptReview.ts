@@ -16,7 +16,7 @@
  * is the exact failure §6ter separates the budget from the stock to avoid.
  */
 
-import type { ReceiptLine, ReceiptConfirmLine } from '../../api/types';
+import type { ExpiryKind, ReceiptLine, ReceiptConfirmLine } from '../../api/types';
 import { formatAmount } from '../../lib/expiry';
 import { normaliseAmount } from '../../lib/quantity';
 
@@ -46,6 +46,17 @@ export interface ReceiptDraftLine {
   /** Removed from the review. Kept in the list so the removal is undoable. */
   removed: boolean;
   /**
+   * The printed date and its kind, as two half-typed fields rather than a
+   * parsed value — same reason as `amount` above: what somebody is in the
+   * middle of typing must survive a re-render.
+   *
+   * Empty means "leave the import's default", which is `best_before` and no
+   * date: a drive recap prints no expiry at all, so this screen is the only
+   * moment the packet is still in hand and the date legible.
+   */
+  expiresOn: string;
+  expiryKind: ExpiryKind | '';
+  /**
    * Where this article goes, or `null` for "wherever the rest of the shop goes".
    *
    * `null` rather than a copy of the receipt-wide choice, so that changing that
@@ -69,6 +80,8 @@ export function toReceiptDrafts(lines: ReceiptLine[]): ReceiptDraftLine[] {
     suggestedMatch: line.match_status === 'suggested',
     removed: false,
     locationId: null,
+    expiresOn: '',
+    expiryKind: '',
   }));
 }
 
@@ -126,8 +139,14 @@ export function toReceiptConfirmLines(lines: ReceiptDraftLine[]): ReceiptConfirm
       const unit = line.unit.trim();
       const quantity = amount !== null && unit !== '' ? { amount, unit } : undefined;
       const where = line.locationId === null ? {} : { location_id: line.locationId };
+      // Only what the reviewer filled in. Sending an empty date would clear a
+      // default the import chose on purpose.
+      const when = {
+        ...(line.expiresOn === '' ? {} : { expires_on: line.expiresOn }),
+        ...(line.expiryKind === '' ? {} : { expiry_kind: line.expiryKind }),
+      };
       return line.productId !== null
-        ? { id: line.id, product_id: line.productId, quantity, ...where }
-        : { id: line.id, label: line.label.trim(), quantity, ...where };
+        ? { id: line.id, product_id: line.productId, quantity, ...where, ...when }
+        : { id: line.id, label: line.label.trim(), quantity, ...where, ...when };
     });
 }

@@ -844,7 +844,18 @@ class ReceiptImportService:
                     unit=unit_code,
                     product_id=product_id,
                     location_id=location_id,
-                    expiry_kind=ExpiryDateKind.BEST_BEFORE,
+                    expires_on=line.expires_on,
+                    # `best_before` stays the fallback, and with no date beside it
+                    # `_resolve_expiry_kind` collapses it to `unknown` anyway — which
+                    # is the honest record for a recap that printed no expiry. What
+                    # changes here is that the reviewer can say otherwise while the
+                    # packet is still in their hand, the only moment the printed date
+                    # is legible.
+                    expiry_kind=(
+                        ExpiryDateKind(line.expiry_kind)
+                        if line.expiry_kind is not None
+                        else ExpiryDateKind.BEST_BEFORE
+                    ),
                     source=StockEntrySource.RECEIPT_IMPORT,
                     source_receipt_line_id=row.id,
                 ),

@@ -382,3 +382,27 @@
     min-height: var(--tap-target);
   }
 }
+
+/* Une étiquette au-dessus des deux réglages que l'import ne devine pas. Elle
+   existe parce que son absence a coûté deux jours : le sélecteur de rangement
+   était livré, déployé, et invisible pour qui ne savait pas qu'il existait. */
+.lineFieldsLabel {
+  margin: var(--space-2) 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Le type de date et la date, sur une ligne qui se replie plutôt que de se
+   comprimer : un champ date a une largeur minimale confortable sur chaque
+   plateforme, et le serrer rend le jour et le mois illisibles. */
+.lineWhen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.lineWhen > * {
+  flex: 1 1 10rem;
+  min-width: 0;
+}

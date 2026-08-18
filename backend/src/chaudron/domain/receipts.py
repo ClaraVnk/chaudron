@@ -268,6 +268,38 @@ class ConfirmReceiptLine:
     label: str | None = None
     amount: Decimal | None = None
     unit_code: str | None = None
+    #: The printed date, and what kind of date it is. Both are ``None`` when the
+    #: reviewer left them alone, which is the common case for a drive recap:
+    #: **a recap prints no expiry at all**, so the import has nothing to read and
+    #: the lot arrives dateless.
+    #:
+    #: That is exactly why they belong on the review screen rather than only in
+    #: the inventory afterwards. This is the moment the packet is in someone's
+    #: hand and the date is legible on it; an hour later it is in the fridge and
+    #: correcting fifty lots one at a time is the work the review screen exists
+    #: to avoid.
+    #:
+    #: The kind travels WITH the date rather than alone, because a kind with no
+    #: date behind it says nothing: ``_resolve_expiry_kind`` collapses it to
+    #: ``unknown``, and "best before nothing in particular" is not a statement
+    #: about food.
+    #:
+    #: An earlier version of this comment claimed imported lots arrived filed as
+    #: ``best_before`` — that meat was labelled the way dry pasta is. **That was
+    #: false**, and a test caught it: an undated lot is stored ``unknown``, which
+    #: is the honest answer. The feature is worth having for the other reason,
+    #: which needs no exaggeration: you cannot type a date the import never had.
+    expires_on: dt.date | None = None
+    #: A plain string rather than the enum, exactly as ``unit_code`` above is:
+    #: this module is deliberately free of any dependency on the mapped models,
+    #: and importing one for an enum would drag SQLAlchemy into the value
+    #: objects. The router has already validated it against ``ExpiryDateKind``
+    #: and the service converts it back, which raises on anything else.
+    #:
+    #: A literal was tried first and was WRONG in a way mypy caught: it listed
+    #: two values, and the enum has three — ``unknown`` is a legitimate answer
+    #: for a reviewer who cannot read the packet.
+    expiry_kind: str | None = None
     #: Where this article goes, when the reviewer said something different from
     #: the rest of the shop. ``None`` means "whatever the confirmation chose",
     #: which is what every existing client sends.

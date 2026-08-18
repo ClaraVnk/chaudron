@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { StorageLocation } from '../../api/types';
+import type { ExpiryKind, StorageLocation } from '../../api/types';
 import { Badge, Button } from '../../components/ui';
 import { controlClass } from '../../components/controlClass';
 import { unitOptions } from '../../lib/units';
@@ -173,6 +173,37 @@ export function ReceiptLineRow({
               called "défaut": a weekly shop is sorted by reading down the list,
               and a reviewer comparing "Frigo" to "— comme le reste" cannot tell
               at a glance which lines they have already handled. */}
+          {/* Deux réglages que l'import ne peut pas deviner, réunis sous une
+              étiquette VISIBLE. Sans elle, un `select` posé sous le prix se lit
+              comme du décor : la fonctionnalité existait depuis deux jours et
+              son autrice ne l'avait pas trouvée — un contrôle qu'on ne trouve
+              pas est un contrôle qui n'existe pas. */}
+          <p className={styles.lineFieldsLabel}>Rangement et péremption</p>
+
+          <div className={styles.lineWhen}>
+            <select
+              className={[controlClass(), styles.lineExpiryKind].join(' ')}
+              aria-label={`Type de date, article ${String(position)}`}
+              value={line.expiryKind}
+              onChange={(event) => {
+                onChange({ ...line, expiryKind: event.target.value as ExpiryKind | '' });
+              }}
+            >
+              <option value="">Date : non précisée</option>
+              <option value="use_by">DLC — jusqu’au</option>
+              <option value="best_before">DDM — de préférence avant</option>
+            </select>
+            <input
+              className={[controlClass(), styles.lineExpiryDate].join(' ')}
+              type="date"
+              aria-label={`Date de péremption, article ${String(position)}`}
+              value={line.expiresOn}
+              onChange={(event) => {
+                onChange({ ...line, expiresOn: event.target.value });
+              }}
+            />
+          </div>
+
           {locations.length === 0 ? null : (
             <div className={styles.lineWhere}>
               <select

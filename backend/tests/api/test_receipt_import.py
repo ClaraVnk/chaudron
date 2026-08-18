@@ -27,7 +27,14 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from chaudron.domain.models import Household, InventoryLot, Product, Receipt, ReceiptStatus
+from chaudron.domain.models import (
+    ExpiryDateKind,
+    Household,
+    InventoryLot,
+    Product,
+    Receipt,
+    ReceiptStatus,
+)
 from tests.conftest import MakeHousehold, household_headers
 from tests.support import images
 from tests.support.pdfs import build_pdf
@@ -439,6 +446,58 @@ async def test_each_line_can_name_its_own_storage_location(
     # never heard of this field behaves exactly as before.
     assert placed.count(uuid.UUID(fridge["id"])) == 2
     assert placed.count(uuid.UUID(cupboard["id"])) == 1
+
+
+async def test_a_reviewer_can_date_a_line_while_the_packet_is_in_hand(
+    api_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    make_household: MakeHousehold,
+) -> None:
+    """The date is the field an import is least able to get right.
+
+    A drive recap prints no expiry at all, so every imported lot arrived dateless
+    and filed as ``best_before`` — minced meat labelled the way dry pasta is. The
+    review screen is the only moment the packet is still in someone's hand and the
+    printed date legible; an hour later it is in the fridge.
+    """
+    household = await make_household()
+    proposal = (await _import_recap(api_client, household)).json()
+    lines = proposal["lines"]
+
+    confirmed = await api_client.post(
+        f"/v1/receipts/{proposal['id']}/confirm",
+        json={
+            "lines": [
+                {
+                    "id": lines[0]["id"],
+                    "expires_on": "2026-09-15",
+                    "expiry_kind": "use_by",
+                },
+                {"id": lines[1]["id"]},
+            ]
+        },
+        headers=household_headers(household),
+    )
+    assert confirmed.status_code == 201, confirmed.text
+
+    lots = (
+        await db_session.scalars(
+            select(InventoryLot).where(InventoryLot.household_id == household.id)
+        )
+    ).all()
+    dated = [lot for lot in lots if lot.best_before is not None]
+    assert len(dated) == 1
+    dated_on = dated[0].best_before
+    assert dated_on is not None and dated_on.isoformat() == "2026-09-15"
+    assert dated[0].date_kind == ExpiryDateKind.USE_BY
+
+    # The line left alone stays UNDATED and UNKNOWN — it does not inherit the
+    # other's date, and it does not get a kind either. `_resolve_expiry_kind`
+    # refuses to name a kind with no date behind it, which is right: "best before
+    # nothing in particular" is not a statement about food.
+    undated = [lot for lot in lots if lot.best_before is None]
+    assert len(undated) == 1
+    assert undated[0].date_kind == ExpiryDateKind.UNKNOWN
 
 
 async def test_a_line_naming_another_household_s_location_writes_nothing(
